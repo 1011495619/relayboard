@@ -17,14 +17,16 @@ function typedContracts(service: Service) {
   });
   // @ts-expect-error task_create requires acceptance.
   service.execute("task_create", { project_id: project.id, title: "Missing" });
-  // @ts-expect-error a claim uses a Run identity, never an agent_id field.
   service.execute("task_claim", {
     task_id: task.id,
+    // @ts-expect-error a claim uses a Run identity, never an agent_id field.
     agent_id: "agent",
     expected_version: 1,
   });
   // @ts-expect-error project query requires project_id.
   service.query("project", { task_id: task.id });
+  // @ts-expect-error project query requires its input object.
+  service.query("project");
   return task;
 }
 void typedContracts;
@@ -39,6 +41,11 @@ test("dynamic protocol names still validate inputs at runtime", () => {
         service.execute(operation, { task_id: "fixture", agent_id: "wrong" }),
       { name: "ZodError" },
     );
+    const queryName: string = "projects";
+    assert.throws(() => service.query(queryName, { unexpected: true }), {
+      name: "ZodError",
+    });
+    assert.deepEqual(service.query("projects"), []);
     assert.throws(
       () => service.execute("unknown_operation", {}),
       (error: unknown) =>

@@ -100,6 +100,15 @@ test("HTTP validates requests, restricts origins, supports idempotent mutations 
     ).status,
     403,
   );
+  assert.equal(
+    (
+      await f.post("/api/query", {
+        query: "projects",
+        args: { unexpected: true },
+      })
+    ).status,
+    400,
+  );
   const task = await f.command("task_create", {
     project_id: project.id,
     title: "实现",

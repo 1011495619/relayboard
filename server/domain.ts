@@ -384,7 +384,7 @@ export class Service {
     });
     return result;
   }
-  query<K extends string>(name: K, input?: K extends QueryName ? NoInfer<QueryInput<K>> : unknown): K extends QueryName ? QueryResults[K] : QueryResults[QueryName];
+  query<K extends string>(name: K, ...args: K extends QueryName ? {} extends QueryInput<K> ? [input?: NoInfer<QueryInput<K>>] : [input: NoInfer<QueryInput<K>>] : [input?: unknown]): K extends QueryName ? QueryResults[K] : QueryResults[QueryName];
   query(name: string, input: unknown = {}): QueryResults[QueryName] {
     const schema = queries[name as QueryName];
     if (!schema) throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
@@ -416,12 +416,14 @@ export class Service {
             : null,
       };
     }
-    if (name === "projects")
+    if (name === "projects") {
+      queries.projects.parse(input);
       return this.store.list("project").map((p) => ({
         ...p,
         task_count: this.tasks(p.id).length,
         done_count: this.tasks(p.id).filter((t) => t.status === "done").length,
       }));
+    }
     if (name === "snapshot") {
       const args = queries.snapshot.parse(input);
       const project = this.get("project", args.project_id);
