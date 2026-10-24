@@ -10,14 +10,8 @@
     "outDir": "lib",
     "declaration": true,
     "sourceMap": true,
-    "types": [
-      "node"
-    ],
+    "types": ["node"],
     "rewriteRelativeImportExtensions": true
   },
-  "include": [
-    "server/**/*.ts",
-    "bin/**/*.ts",
-    "integrations/**/*.ts"
-  ]
+  "include": ["server/**/*.ts", "bin/**/*.ts", "integrations/**/*.ts"]
 }

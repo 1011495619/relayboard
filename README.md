@@ -47,6 +47,56 @@ PORT=4320 RELAYBOARD_DATA_DIR=/absolute/path/to/data RELAYBOARD_TOKEN=YOUR_TOKEN
 
 设置令牌后，网页要求输入同一令牌，CLI/MCP 通过 `RELAYBOARD_TOKEN` 环境变量连接。`RELAYBOARD_RUNNERS=0` 关闭从网页启动进程的能力。客户端和服务端使用同一台机器；本版没有实现跨设备文件同步、远程多租户或公共网络部署。
 
+## 从看板启动 Agent
+
+服务默认允许手动启动本机 CLI；自动领取仅在某个 Run 明确启用并设置次数预算后生效。侧栏「Agent 接入」列出客户端、安装入口、CLI 检测结果和按客户端生成的 MCP 配置。安装/登录请在终端完成，重新检测只运行版本命令，不调用模型。CLI 就绪不代表账户已经登录，也不证明工具有写入权限。
+
+1. 在「Agent 接入」选择工具并登记执行者，填写真实工作目录。
+2. 在任务看板领取任务，或通过显式交接取得任务归属。
+3. 点击「启动执行」，核对客户端与任务后启动；可在执行者树查看日志、失败原因和停止进程。
+4. 模型收到身份、接手包和报告协议。Codex/Claude 默认适配器通过启动参数注入本次会话的 `relayboard_session` MCP 连接，报告可直接通过 MCP 工具完成；不写入全局配置、不调整审批或终端沙箱。原生子 Agent 仍须先登记独立 Run，再领取和报告各自的任务。进程退出不会自动验收任务。
+
+若页面显示 `RELAYBOARD_RUNNERS=0`，先在运行服务的终端按 Ctrl+C，再执行：
+
+```bash
+RELAYBOARD_RUNNERS=1 npm start
+```
+
+另开终端重复启动会复用旧服务并保留它的设置；启动日志现在会提示这个情况。安装了 CLI 但仍提示缺失时，检查**服务进程的 PATH**；在已配置 PATH 的终端重启，或用下面的绝对路径覆盖命令。
+
+### 客户端覆盖范围
+
+| 使用方式 | 客户端 |
+| --- | --- |
+| 从网页启动本机 CLI | Codex、Claude Code、pi、Gemini CLI、OpenCode、GitHub Copilot CLI、Cursor Agent、Qwen Code、Goose、Aider、Kilo Code CLI、Auggie、Amp |
+| 提供 MCP 配置与接入指引，从客户端开始会话 | Cline、Roo Code、Windsurf、Trae、Continue、Kiro、Antigravity、Hermes Agent |
+| 扩展其他客户端 | 通用 MCP，或为 `other` 配置自定义 CLI |
+
+这是一份可扩展目录。MCP 项表示选择了 MCP 接入路径，不表示厂商没有其他 CLI。各工具的模型、登录、扩展和权限依赖所用版本。CLI 配置依照官方文档；实际推理实测与受控适配器测试分开记录在 VALIDATION.md，目录项不代表全部客户端都已安装或完成推理测试。pi 无原生 MCP 支持的版本需使用随包生命周期扩展或支持 MCP 的客户端扩展；托管进程仍能使用注入的 Relayboard CLI 报告。
+
+品牌图标使用 LobeHub 官方 `@lobehub/icons-static-svg` 包，随网页离线构建，支持明暗主题；所用图标包尚无 Aider、Auggie、Continue 的品牌图标，显示名称首字，不使用其他厂商图标冒充。
+
+### 自定义 CLI 命令
+
+在**数据目录**下创建 `runner-profiles.json`。页面目录会显示实际路径。配置只覆盖指定项，修改后重启服务。可用绝对路径解决 PATH、同名命令或客户端版本差异；也可以使用 `other` 接入新的命令行客户端。
+
+```json
+{
+  "cursor": {
+    "command": "/absolute/path/to/agent",
+    "args": ["--print", "--output-format", "stream-json", "{prompt}"]
+  },
+  "other": {
+    "command": "/absolute/path/to/my-agent",
+    "args": ["--prompt", "{prompt}"]
+  }
+}
+```
+
+`command` 是单独的可执行文件，`args` 是逐项参数数组，服务不通过 shell 执行。`{prompt}` 会按原样替换为任务接手包；未放占位符时追加到参数末尾。Codex 的 `stdin: true` 会追加 `-` 并从标准输入发送接手包。可选 `versionArgs` 覆盖默认的 `["--version"]`，`mcp: "codex"` 或 `"claude"` 可为兼容命令启用会话 MCP 注入。保持客户端权限配置；服务不自动追加跳过审批或扩大写入权限的开关。Aider 默认关闭自动 Git 提交，代码提交仍按项目规范完成。
+
+源码内部相对导入使用 `.ts`，TypeScript 的 `rewriteRelativeImportExtensions` 在编译产物中转换为 `.js`。第三方包如 MCP SDK 的 `.../index.js` 是其正式导出路径，保留原样。npm 包继续运行 `lib/` 编译产物，使用者无需 TypeScript 运行器。
+
 ## 网页使用
 
 1. 创建项目，填写目标、用户约束和实际代码目录；示例项目不会启动 AI。

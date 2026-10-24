@@ -12,8 +12,20 @@ import {
   readSync,
   closeSync,
   statSync,
+  readFileSync,
+  accessSync,
+  constants,
 } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve, join, delimiter, isAbsolute } from "node:path";
+import { z } from "zod";
+import {
+  runtimeCatalog,
+  defaultRunnerProfiles,
+  type RunnerProfile,
+  type RuntimeInfo,
+  type RunnerStatus,
+} from "./runtimes.ts";
+export type { RunnerProfile } from "./runtimes.ts";
 import { runtimeRoot, runtimeExtension, runtimeNodeArgs } from "./config.ts";
 import type { ProcessInfo } from "./types.ts";
 import { errorInfo } from "../bin/errors.ts";
@@ -33,11 +45,6 @@ const cliCommand = [
   .join(" ");
 const stamp = () => new Date().toISOString();
 
-export interface RunnerProfile {
-  command: string;
-  args: string[];
-  stdin?: boolean;
-}
 interface ManagedChild {
   child: ChildProcessWithoutNullStreams;
   task_id: string;
@@ -46,6 +53,8 @@ interface ManagedChild {
   heartbeat?: NodeJS.Timeout;
   stopped: boolean;
   outputBuffer: string;
+  stderrTail: string;
+  lastToolError: string;
   finished: boolean;
 }
 export interface RunnerOptions {
@@ -78,17 +87,9 @@ export class Runner {
     this.baseUrl = baseUrl;
     this.token = token;
     this.timeoutMs = timeoutMs;
-    this.profiles = profiles || {
-      codex: {
-        command: "codex",
-        args: ["exec", "--json", "--color", "never", "--skip-git-repo-check"],
-        stdin: true,
-      },
-      claude: {
-        command: "claude",
-        args: ["--print", "--verbose", "--output-format", "stream-json"],
-      },
-      pi: { command: "pi", args: ["--print", "--mode", "json"] },
+    this.profiles = profiles ?? {
+      ...defaultRunnerProfiles,
+      ...readRunnerProfiles(this.configPath),
     };
     this.live = new Map();
     mkdirSync(join(dataDir, "logs"), { recursive: true });
@@ -114,32 +115,109 @@ export class Runner {
         });
       }
   }
-  async availability() {
+  get enabled() {
+    return process.env.RELAYBOARD_RUNNERS !== "0";
+  }
+  get configPath() {
+    return join(this.dataDir, "runner-profiles.json");
+  }
+  get disabledReason() {
+    return this.enabled
+      ? ""
+      : "服务通过 RELAYBOARD_RUNNERS=0 关闭了进程启动。请停止当前服务，在终端执行 RELAYBOARD_RUNNERS=1 npm start；在其他终端重复启动只会复用旧服务。";
+  }
+  private availabilityCache?: { at: number; values: RuntimeInfo[] };
+  async availability(refresh = false): Promise<RuntimeInfo[]> {
+    if (
+      !refresh &&
+      this.availabilityCache &&
+      Date.now() - this.availabilityCache.at < 15000
+    )
+      return this.availabilityCache.values.map((r) => ({
+        ...r,
+        launch_enabled: this.enabled,
+        launchable: this.enabled && r.available && !!this.profiles[r.runtime],
+        reason:
+          this.profiles[r.runtime] && r.available
+            ? this.enabled
+              ? "CLI 检测通过；登录与工具权限由客户端在执行时确认。"
+              : this.disabledReason
+            : r.reason,
+      }));
     const entries = await Promise.all(
-      Object.entries(this.profiles).map(async ([runtime, profile]) => {
+      runtimeCatalog.map(async (definition) => {
+        const { profile: _default, ...meta } = definition;
+        const profile = this.profiles[meta.runtime];
+        const base: RuntimeInfo = {
+          ...meta,
+          mode: profile ? "cli" : meta.mode,
+          available: false,
+          version: "",
+          launch_enabled: this.enabled,
+          launchable: false,
+          command: profile?.command || "",
+          args: profile?.args || [],
+          reason: profile ? "" : meta.note,
+          auth_status: profile ? "unchecked" : "not_applicable",
+        };
+        if (!profile) return base;
         try {
-          const { stdout } = await exec(profile.command, ["--version"], {
-            timeout: 7000,
-            maxBuffer: 8192,
-          });
+          const { stdout, stderr } = await exec(
+            profile.command,
+            profile.versionArgs || ["--version"],
+            { timeout: 7000, maxBuffer: 16384 },
+          );
           return {
-            runtime,
+            ...base,
             available: true,
-            version: stdout.trim().split("\n")[0],
+            version: (stdout || stderr).trim().split("\n")[0].slice(0, 240),
+            launchable: this.enabled,
+            reason: this.enabled
+              ? "CLI 检测通过；登录与工具权限由客户端在执行时确认。"
+              : this.disabledReason,
           };
-        } catch {
-          return { runtime, available: false, version: "" };
+        } catch (error) {
+          const code = errorInfo(error).code;
+          return {
+            ...base,
+            reason:
+              code === "ENOENT"
+                ? `服务的 PATH 中未找到 ${profile.command}。请在终端安装并完成首次配置，然后重启服务以刷新 PATH。`
+                : `CLI 版本检测失败或超时：${errorInfo(error).message.slice(0, 400)}`,
+          };
         }
       }),
     );
+    this.availabilityCache = { at: Date.now(), values: entries };
     return entries;
   }
-  start({ run_id, task_id }: { run_id: string; task_id: string }) {
+  async status(refresh = false): Promise<RunnerStatus> {
+    return {
+      enabled: this.enabled,
+      reason: this.disabledReason,
+      config_path: this.configPath,
+      runtimes: await this.availability(refresh),
+    };
+  }
+  async preflight(args: { run_id: string; task_id: string }) {
+    this.validateStart(args);
+    const runtime = (await this.availability(true)).find(
+      (r) => r.runtime === this.service.run(args.run_id).runtime,
+    );
+    if (!runtime?.available)
+      throw new AppError(
+        "CLI_UNAVAILABLE",
+        runtime?.reason || "请先配置此客户端的启动命令。",
+        409,
+      );
+    return runtime;
+  }
+  validateStart({ run_id, task_id }: { run_id: string; task_id: string }) {
     const s = this.service,
       run = s.run(run_id),
       task = s.task(task_id);
-    if (process.env.RELAYBOARD_RUNNERS === "0")
-      throw new AppError("RUNNERS_DISABLED", "此服务已关闭进程启动功能");
+    if (!this.enabled)
+      throw new AppError("RUNNERS_DISABLED", this.disabledReason, 409);
     if (!this.profiles[run.runtime])
       throw new AppError(
         "RUNTIME_UNSUPPORTED",
@@ -197,15 +275,32 @@ export class Runner {
         "DEPENDENCIES_PENDING",
         "前置任务尚未验收，请先等待或处理独立准备工作",
       );
+  }
+  start(input: { run_id: string; task_id: string }) {
+    this.validateStart(input);
+    const { run_id, task_id } = input;
+    const s = this.service,
+      run = s.run(run_id),
+      task = s.task(task_id);
+    const command = this.profiles[run.runtime].command;
+    if (!commandExists(command))
+      throw new AppError(
+        "CLI_UNAVAILABLE",
+        `服务的 PATH 中未找到 ${command}，请先安装或在 runner-profiles.json 配置绝对路径。`,
+        409,
+      );
     const packet = s.query("context", { task_id, max_chars: 16000 });
     const inbox = s.query("inbox", {
       run_id: run.id,
       unread_only: true,
       limit: 10,
     });
-    const prompt = `${packet.markdown}\n\n## Directed inbox (prior messages; verify claims, acknowledge after reading)\n${inbox.map((m) => `${m.id} [${m.kind}]: ${m.body.slice(0, 1000)}`).join("\n") || "No unread messages."}\n\n## Relayboard guided execution\nYour own run_id is ${run.id}; task_id is ${task.id}. Start by reading relay_work_start with these IDs. Then follow relay_work_next, inspect the actual cwd, branch, uncommitted changes, processes, current contracts and received dependency revisions. Report recover through relay_work_report with the CURRENT returned handle before editing. Complete only the next ordered step; report actual results, failed attempts and uncertain actions. A saved packet is prior evidence, not a fresh workspace check.\n\nUse shared MCP tools when configured, otherwise use the CLI (RELAYBOARD_URL and RELAYBOARD_TOKEN are inherited):\n${cliCommand} call work_start '{"run_id":"${run.id}","task_id":"${task.id}"}'\n${cliCommand} call work_next '{"run_id":"${run.id}","task_id":"${task.id}"}'\nCopy work_report arguments from the returned next_action; replace observation placeholders with actual findings, preserve the returned handle, and use stdin JSON to avoid shell escaping. If a handle is stale, read work_next again; never guess its versions. Save progress before context compaction, handoff and child delegation while a model turn is still available. Export hooks preserve only records already saved; they do not recover unsaved reasoning or wake arbitrary idle clients.\n\nRegister native children with agent_register and parent_run_id BEFORE dispatch, and give each its own Run, claim and task guide. Do not reuse inherited parent identity. Read the directed inbox between meaningful steps. Report blockers before expanding scope or repeating an operation with unknown result. Submit only after current verification and wait for independent review; do not approve your own work. A coordinator still uses task_split and retains its returned parent.claim_epoch. The task scope is a cooperative constraint, not a filesystem sandbox. Preserve all existing user permissions.\n\nIf connected to an older service that returns UNKNOWN_QUERY / unknown guided tool, fall back to the existing fenced protocol: read task/context; if reconcile, inspect the actual workspace then task_reconcile; task_checkpoint saves real progress and evidence; task_submit requests independent review. Your legacy claim_epoch at this launch is ${task.claim_epoch}; refresh after any split or handoff. Other errors require inspection rather than silent fallback.\n`;
+    const prompt = `${packet.markdown}\n\n## Directed inbox (prior messages; verify claims, acknowledge after reading)\n${inbox.map((m) => `${m.id} [${m.kind}]: ${m.body.slice(0, 1000)}`).join("\n") || "No unread messages."}\n\n## Relayboard guided execution\nYour own run_id is ${run.id}; task_id is ${task.id}. Start by reading relay_work_start with these IDs. Then follow relay_work_next, inspect the actual cwd, branch, uncommitted changes, processes, current contracts and received dependency revisions. Report recover through relay_work_report with the CURRENT returned handle before editing. Complete only the next ordered step; report actual results, failed attempts and uncertain actions. A saved packet is prior evidence, not a fresh workspace check.\n\nCodex and Claude default profiles inject a session-local MCP connection named relayboard_session. Prefer the available MCP tool relay_work_start (tool names may include the relayboard_session namespace) and the following relay_work_next / relay_work_report tools. This connection runs outside the model shell sandbox. If no MCP tool is available, use the CLI (RELAYBOARD_URL and RELAYBOARD_TOKEN are inherited):\n${cliCommand} call work_start '{"run_id":"${run.id}","task_id":"${task.id}"}'\n${cliCommand} call work_next '{"run_id":"${run.id}","task_id":"${task.id}"}'\nCopy work_report arguments from the returned next_action; replace observation placeholders with actual findings, preserve the returned handle, and use stdin JSON to avoid shell escaping. If a handle is stale, read work_next again; never guess its versions. Save progress before context compaction, handoff and child delegation while a model turn is still available. Export hooks preserve only records already saved; they do not recover unsaved reasoning or wake arbitrary idle clients.\n\nRegister native children with agent_register and parent_run_id BEFORE dispatch, and give each its own Run, claim and task guide. Do not reuse inherited parent identity. Read the directed inbox between meaningful steps. Report blockers before expanding scope or repeating an operation with unknown result. Submit only after current verification and wait for independent review; do not approve your own work. A coordinator still uses task_split and retains its returned parent.claim_epoch. The task scope is a cooperative constraint, not a filesystem sandbox. Preserve all existing user permissions.\n\nIf connected to an older service that returns UNKNOWN_QUERY / unknown guided tool, fall back to the existing fenced protocol: read task/context; if reconcile, inspect the actual workspace then task_reconcile; task_checkpoint saves real progress and evidence; task_submit requests independent review. Your legacy claim_epoch at this launch is ${task.claim_epoch}; refresh after any split or handoff. Other errors require inspection rather than silent fallback.\n`;
     const profile = this.profiles[run.runtime],
-      args = [...profile.args, ...(profile.stdin ? ["-"] : [prompt])];
+      args = buildRunnerArgs(profile, prompt, {
+        baseUrl: this.baseUrl,
+        tokenRequired: !!this.token,
+      });
     const logPath = join(this.dataDir, "logs", `${run.id}.log`);
     appendFileSync(
       logPath,
@@ -231,6 +326,8 @@ export class Runner {
       timer: undefined,
       stopped: false,
       outputBuffer: "",
+      stderrTail: "",
+      lastToolError: "",
       finished: false,
     };
     this.live.set(run.id, record);
@@ -257,18 +354,18 @@ export class Runner {
     const output = (chunk: Buffer, stream: "stdout" | "stderr") => {
       const text = chunk.toString();
       appendFileSync(logPath, text);
+      if (stream === "stderr")
+        record.stderrTail = (record.stderrTail + text).slice(-4000);
       if (stream === "stdout") {
         record.outputBuffer = (record.outputBuffer + text).slice(-65536);
         const lines = record.outputBuffer.split("\n");
         record.outputBuffer = lines.pop() || "";
         for (const line of lines) {
           try {
-            const event = JSON.parse(line),
-              providerId =
-                event.thread_id ||
-                (event.type === "system" && event.subtype === "init"
-                  ? event.session_id
-                  : null);
+            const event: unknown = JSON.parse(line),
+              providerId = providerSessionId(run.runtime, event);
+            const toolError = providerToolError(run.runtime, event);
+            if (toolError) record.lastToolError = toolError;
             if (providerId)
               s.store.transaction(() =>
                 s.update("run", s.run(run.id), {
@@ -299,6 +396,10 @@ export class Runner {
       );
       s.store.transaction(() => {
         const current = s.run(run.id);
+        const savedTask = s.task(task_id);
+        const savedProgress =
+          savedTask.checkpoint?.run_id === run.id &&
+          savedTask.checkpoint.at >= processInfo.started_at!;
         s.update("run", current, {
           process: {
             ...current.process,
@@ -312,7 +413,16 @@ export class Runner {
             ended_at: stamp(),
             exit_code: code,
             signal,
-            error: error?.message,
+            note:
+              record.lastToolError && !savedProgress
+                ? `本次进程尚未保存任务进度。客户端工具报错：${record.lastToolError}`
+                : undefined,
+            error:
+              error?.message ||
+              (!record.stopped && code !== 0
+                ? record.stderrTail.trim().slice(-2000) ||
+                  `CLI 退出码 ${code ?? signal}；请查看运行日志。`
+                : undefined),
           },
           last_seen_at: stamp(),
         });
@@ -450,4 +560,133 @@ export async function createWorktree(
     }),
   );
   return { workdir: dir, branch, base_commit: stdout.trim() };
+}
+
+/** Configuration is data, never shell source. Only explicitly selected profiles run. */
+export function readRunnerProfiles(
+  path: string,
+): Record<string, RunnerProfile> {
+  if (!existsSync(path)) return {};
+  const profile = z
+    .object({
+      command: z.string().min(1).max(2000),
+      args: z.array(z.string().max(12000)).max(80),
+      stdin: z.boolean().optional(),
+      versionArgs: z.array(z.string().max(1000)).min(1).max(20).optional(),
+      mcp: z.enum(["codex", "claude"]).optional(),
+    })
+    .strict();
+  const parsed = z
+    .record(z.string(), profile)
+    .parse(JSON.parse(readFileSync(path, "utf8")));
+  for (const [id, value] of Object.entries(parsed)) {
+    if (id === "human" || (!defaultRunnerProfiles[id] && id !== "other"))
+      throw new Error(`启动配置 ${id} 应使用已有 CLI 类型或 other。`);
+    if (value.stdin && value.args.some((arg) => arg.includes("{prompt}")))
+      throw new Error(
+        `启动配置 ${id} 请在 stdin 和 {prompt} 中选择一种输入方式。`,
+      );
+  }
+  return parsed;
+}
+export function buildRunnerArgs(
+  profile: RunnerProfile,
+  prompt: string,
+  connection?: { baseUrl: string; tokenRequired: boolean },
+): string[] {
+  const args = [...profile.args];
+  if (connection && profile.mcp === "codex") {
+    args.push(
+      "-c",
+      `mcp_servers.relayboard_session.url=${JSON.stringify(connection.baseUrl + "/mcp")}`,
+    );
+    if (connection.tokenRequired)
+      args.push(
+        "-c",
+        'mcp_servers.relayboard_session.bearer_token_env_var="RELAYBOARD_TOKEN"',
+      );
+  } else if (connection && profile.mcp === "claude") {
+    args.push(
+      "--mcp-config",
+      JSON.stringify({
+        mcpServers: {
+          relayboard_session: {
+            type: "http",
+            url: connection.baseUrl + "/mcp",
+            ...(connection.tokenRequired
+              ? { headers: { Authorization: "Bearer ${RELAYBOARD_TOKEN}" } }
+              : {}),
+          },
+        },
+      }),
+    );
+  }
+  if (profile.stdin) return [...args, "-"];
+  if (args.some((arg) => arg.includes("{prompt}")))
+    return args.map((arg) => arg.replaceAll("{prompt}", prompt));
+  return [...args, prompt];
+}
+export function commandExists(command: string): boolean {
+  const candidates =
+    isAbsolute(command) || command.includes("/") || command.includes("\\")
+      ? [command]
+      : (process.env.PATH || "")
+          .split(delimiter)
+          .flatMap((dir) =>
+            process.platform === "win32"
+              ? (process.env.PATHEXT || ".EXE;.CMD;.BAT")
+                  .split(";")
+                  .map((ext) => join(dir, command + ext))
+              : [join(dir, command)],
+          );
+  return candidates.some((path) => {
+    try {
+      accessSync(path, constants.X_OK);
+      return statSync(path).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+export function providerSessionId(
+  runtime: string,
+  value: unknown,
+): string | null {
+  if (!value || typeof value !== "object") return null;
+  const e = value as Record<string, unknown>;
+  let id: unknown;
+  if (runtime === "codex" && e.type === "thread.started") id = e.thread_id;
+  else if (
+    ["claude", "qwen"].includes(runtime) &&
+    e.type === "system" &&
+    ["init", "session_start"].includes(String(e.subtype))
+  )
+    id = e.session_id;
+  else if (runtime === "gemini" && e.type === "init") id = e.session_id;
+  else if (["opencode", "kilo"].includes(runtime)) id = e.sessionID;
+  else if (runtime === "cursor" && e.type === "system" && e.subtype === "init")
+    id = e.session_id;
+  return typeof id === "string" && id.length > 0 && id.length <= 500
+    ? id
+    : null;
+}
+
+/** Surface an observed tool rejection separately from the OS process exit status. */
+export function providerToolError(
+  runtime: string,
+  value: unknown,
+): string | null {
+  if (runtime !== "codex" || !value || typeof value !== "object") return null;
+  const e = value as Record<string, unknown>;
+  if (e.type !== "item.completed" || !e.item || typeof e.item !== "object")
+    return null;
+  const item = e.item as Record<string, unknown>;
+  if (
+    item.type !== "mcp_tool_call" ||
+    !item.error ||
+    typeof item.error !== "object"
+  )
+    return null;
+  const message = (item.error as Record<string, unknown>).message;
+  return typeof message === "string" ? message.slice(0, 2000) : null;
 }

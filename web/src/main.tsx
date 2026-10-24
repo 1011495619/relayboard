@@ -144,6 +144,14 @@ import { RequestResolution } from "./components/request-resolution";
 import { ExecutionGuide } from "./components/execution-guide";
 import { ExecutionEditor } from "./components/execution-editor";
 import type { ExecutionPlan } from "../../server/types.ts";
+import {
+  runtimeIds,
+  runtimeNames,
+  supportsLaunch,
+  type RunnerStatus,
+} from "../../server/runtimes.ts";
+import { AgentIcon } from "./components/agent-icon";
+import { AgentCatalog } from "./components/agent-catalog";
 import "./style.css";
 class ApiError extends Error {
   code?: string;
@@ -162,18 +170,23 @@ type ApiResult<P extends string> = P extends "/skills"
   ? Skill[]
   : P extends `/skills/${string}`
     ? SkillSource
-    : P extends "/integration"
-      ? Integration
-      : P extends "/runtimes"
-        ? RuntimeInfo[]
-        : P extends `/runner/logs/${string}`
-          ? { text: string; truncated: boolean }
-          : P extends "/export"
-            ? { path: string }
-            : P extends "/worktree"
-              ? { workdir: string; branch: string }
-              : unknown;
+    : P extends "/runner/status"
+      ? RunnerStatus
+      : P extends "/integration"
+        ? Integration
+        : P extends "/runtimes"
+          ? RuntimeInfo[]
+          : P extends `/runner/logs/${string}`
+            ? { text: string; truncated: boolean }
+            : P extends "/export"
+              ? { path: string }
+              : P extends "/worktree"
+                ? { workdir: string; branch: string }
+                : unknown;
 
+const loadIntegration = () => api("/integration", null, "GET");
+const loadRunnerStatus = (refresh = false) =>
+  api("/runner/status", null, "GET", refresh);
 const API = "/api";
 const statusNames: Record<string, string> = {
   pending: "待领取",
@@ -182,13 +195,6 @@ const statusNames: Record<string, string> = {
   reconcile: "待核验",
   review: "待验收",
   done: "已完成",
-};
-const runtimeNames: Record<string, string> = {
-  codex: "Codex",
-  claude: "Claude Code",
-  pi: "pi agent",
-  other: "其他工具",
-  human: "人工",
 };
 const eventNames: Record<string, string> = {
   "project.created": "创建项目",
@@ -227,6 +233,7 @@ const icons: Record<string, LucideIcon> = {
   discussions: MessageSquare,
   activity: Activity,
   settings: Settings2,
+  clients: Terminal,
   skills: BookOpen,
 };
 const navItems = [
@@ -238,6 +245,7 @@ const navItems = [
   ["discussions", "消息与决定"],
   ["activity", "活动记录"],
   ["skills", "协作 Skills"],
+  ["clients", "Agent 接入"],
   ["settings", "项目与接入"],
 ];
 const splitLines = (value: unknown) =>
@@ -269,9 +277,10 @@ async function api<P extends string>(
   path: P,
   body?: unknown,
   method = "POST",
+  refresh = false,
 ): Promise<ApiResult<P>> {
   const token = localStorage.getItem("relayboard-token");
-  const res = await fetch(`${API}${path}`, {
+  const res = await fetch(`${API}${path}${refresh ? "?refresh=1" : ""}`, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -349,15 +358,7 @@ function Avatar({
       title={run?.name || "待领取"}
     >
       <AvatarFallback>
-        {run
-          ? run.runtime === "claude"
-            ? "✳"
-            : run.runtime === "pi"
-              ? "π"
-              : run.runtime === "codex"
-                ? "⌘"
-                : run.name.slice(0, 1)
-          : "·"}
+        {run ? <AgentIcon runtime={run.runtime} name={run.name} /> : "·"}
       </AvatarFallback>
     </UiAvatar>
   );
@@ -675,9 +676,7 @@ function App() {
     setModal({ kind: "context", packet, task: t });
   };
   const launch = async (run: Run, t: Task) => {
-    await api("/runner/start", { run_id: run.id, task_id: t.id });
-    await refresh();
-    notify(`${runtimeNames[run.runtime]} 已启动，任务结果以检查点和验证为准`);
+    setModal({ kind: "launch", run, task: t });
   };
   const createExample = () =>
     act(async () => {
@@ -1365,6 +1364,14 @@ function App() {
               {view === "activity" && (
                 <ActivityView data={data} openTask={openTask} />
               )}
+              {view === "clients" && (
+                <AgentCatalog
+                  load={loadRunnerStatus}
+                  integration={loadIntegration}
+                  notify={notify}
+                  register={(runtime) => setModal({ kind: "agent", runtime })}
+                />
+              )}
               {view === "settings" && (
                 <SettingsView
                   project={project}
@@ -1673,6 +1680,22 @@ function AgentView({
               {run.branch && <span>{run.branch}</span>}
             </div>
           )}
+          {run.process?.note && (
+            <Alert>
+              <AlertCircle />
+              <AlertDescription className="whitespace-pre-wrap break-words">
+                {run.process.note}
+              </AlertDescription>
+            </Alert>
+          )}
+          {run.process?.status === "failed" && run.process.error && (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertDescription className="whitespace-pre-wrap break-words">
+                {run.process.error}
+              </AlertDescription>
+            </Alert>
+          )}
           <div className="agent-actions">
             <Button
               icon={ArrowUpRight}
@@ -1690,18 +1713,17 @@ function AgentView({
             >
               登记子 agent
             </Button>
-            {owned.length > 0 &&
-              ["codex", "claude", "pi"].includes(run.runtime) && (
-                <Button
-                  icon={Play}
-                  disabled={
-                    run.status !== "active" || run.process?.status === "running"
-                  }
-                  onClick={() => setModal({ kind: "launch", run })}
-                >
-                  启动执行
-                </Button>
-              )}
+            {owned.length > 0 && supportsLaunch(run.runtime) && (
+              <Button
+                icon={Play}
+                disabled={
+                  run.status !== "active" || run.process?.status === "running"
+                }
+                onClick={() => setModal({ kind: "launch", run })}
+              >
+                启动执行
+              </Button>
+            )}
             {run.process?.status === "running" && (
               <Button
                 icon={Square}
@@ -1727,7 +1749,7 @@ function AgentView({
             <Button onClick={() => setModal({ kind: "runEnd", run })}>
               更新状态
             </Button>
-            {["codex", "claude", "pi"].includes(run.runtime) && (
+            {supportsLaunch(run.runtime) && (
               <Button
                 icon={Waypoints}
                 onClick={() => setModal({ kind: "dispatch", run })}
@@ -2380,23 +2402,26 @@ function SettingsView({
           <Terminal size={18} />
         </div>
         {runtimes.length ? (
-          runtimes.map((r) => (
-            <div className="runtime-row" key={r.runtime}>
-              <Avatar run={{ runtime: r.runtime, name: r.runtime }} />
-              <div>
-                <strong>{runtimeNames[r.runtime]}</strong>
-                <small>
-                  {r.available ? r.version : "未在服务的 PATH 中找到"}
-                </small>
+          runtimes
+            .filter((r) => r.mode === "cli" && r.available)
+            .map((r) => (
+              <div className="runtime-row" key={r.runtime}>
+                <Avatar run={{ runtime: r.runtime, name: r.name }} />
+                <div>
+                  <strong>{r.name}</strong>
+                  <small>{r.version}</small>
+                </div>
+                <UiBadge variant="outline">
+                  {r.launchable ? "CLI 已就绪" : "服务禁用启动"}
+                </UiBadge>
               </div>
-              <span className={r.available ? "available" : "muted"}>
-                {r.available ? "可启动" : "未安装"}
-              </span>
-            </div>
-          ))
+            ))
         ) : (
           <p className="muted">正在检查 CLI…</p>
         )}
+        <p className="fine-print">
+          在侧栏「Agent 接入」查看完整客户端目录、安装说明和启动诊断。
+        </p>
         <p className="fine-print">
           使用各工具已有的登录与权限配置。登记会话不启动进程；启动按钮才会发起实际执行。
         </p>
@@ -2574,7 +2599,7 @@ function TaskDrawer({
                 >
                   提交验收
                 </Button>
-                {["codex", "claude", "pi"].includes(owner.runtime) &&
+                {supportsLaunch(owner.runtime) &&
                   owner.process?.status !== "running" && (
                     <Button
                       icon={Play}
@@ -2977,6 +3002,63 @@ function Modal({
       { command: "", result: "", passed: true },
     ]),
     [logs, setLogs] = useState("读取运行日志…");
+  const [runnerStatus, setRunnerStatus] = useState<RunnerStatus | null>(null);
+  const [runnerError, setRunnerError] = useState("");
+  const ownedLaunchTasks = tasks.filter(
+    (t) =>
+      t.owner_run_id === modal.run?.id &&
+      ["doing", "blocked", "reconcile"].includes(t.status),
+  );
+  const [launchTaskId, setLaunchTaskId] = useState(
+    task?.id || ownedLaunchTasks[0]?.id || "",
+  );
+  const refreshRunner = async () => {
+    setRunnerStatus(null);
+    setRunnerError("");
+    try {
+      setRunnerStatus(await loadRunnerStatus(true));
+    } catch (e) {
+      setRunnerError(errorInfo(e).message);
+    }
+  };
+  useEffect(() => {
+    if (kind !== "launch" && kind !== "dispatch") return;
+    let live = true;
+    loadRunnerStatus(true)
+      .then((s) => {
+        if (live) setRunnerStatus(s);
+      })
+      .catch((e) => {
+        if (live) setRunnerError(errorInfo(e).message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [kind, modal.run?.id]);
+  const runtimeInfo = runnerStatus?.runtimes.find(
+    (r) => r.runtime === modal.run?.runtime,
+  );
+  const launchBlock =
+    runnerError ||
+    (!runnerStatus
+      ? "正在检查本机客户端…"
+      : !runnerStatus.enabled
+        ? runnerStatus.reason
+        : !runtimeInfo?.launchable
+          ? runtimeInfo?.reason ||
+            "此客户端通过 MCP 接入，请在客户端内开始会话。"
+          : !modal.run?.workdir
+            ? "请先登记实际工作目录。"
+            : modal.run.status !== "active"
+              ? "请先恢复或登记一个活动执行会话。"
+              : modal.run.process?.status === "running"
+                ? "此会话的进程正在运行。"
+                : modal.run.process?.status === "unknown"
+                  ? "请先核实原进程的停止状态。"
+                  : kind === "launch" &&
+                      !ownedLaunchTasks.some((t) => t.id === launchTaskId)
+                    ? "请先领取任务，或选择此会话已领取的任务。"
+                    : "");
   const titles = {
     project: modal.project ? "编辑项目约定" : "创建项目空间",
     task: task ? "编辑任务" : modal.parent ? "添加子任务" : "创建任务",
@@ -3110,13 +3192,7 @@ function Modal({
           {
             project_id: required(project, "请先选择项目").id,
             name: value("name"),
-            runtime: choice("runtime", [
-              "codex",
-              "claude",
-              "pi",
-              "other",
-              "human",
-            ]),
+            runtime: choice("runtime", runtimeIds),
             parent_run_id: value("parent_run_id") || undefined,
             workdir: value("workdir"),
             branch: value("branch"),
@@ -3292,6 +3368,7 @@ function Modal({
           "申请已处理",
         );
       } else if (kind === "launch") {
+        if (launchBlock) throw new Error(launchBlock);
         await api("/runner/start", {
           run_id: modal.run.id,
           task_id: value("task_id"),
@@ -3317,6 +3394,7 @@ function Modal({
           "会话状态已更新，任务归属仍然保留",
         );
       } else if (kind === "dispatch") {
+        if (f.has("enabled") && launchBlock) throw new Error(launchBlock);
         await mutate(
           "run_dispatch",
           {
@@ -3609,7 +3687,9 @@ function Modal({
                     <Field label="工具">
                       <NativeSelect
                         name="runtime"
-                        defaultValue={modal.parent?.runtime || "codex"}
+                        defaultValue={
+                          modal.runtime || modal.parent?.runtime || "codex"
+                        }
                       >
                         {Object.entries(runtimeNames).map(([k, v]) => (
                           <option value={k} key={k}>
@@ -4116,18 +4196,48 @@ function Modal({
               )}
               {kind === "launch" && (
                 <>
-                  <div className="inline-notice">
-                    <Terminal size={18} />
-                    <p>
+                  <Alert>
+                    <Terminal />
+                    <AlertDescription>
                       将启动本机的 {runtimeNames[modal.run.runtime]}{" "}
-                      CLI，使用它已有的登录与权限配置。真实执行会消耗相应账户额度。
-                    </p>
-                  </div>
+                      CLI，使用客户端已有的登录与权限配置。真实执行会消耗相应账户额度。
+                    </AlertDescription>
+                  </Alert>
+                  {launchBlock && (
+                    <Alert
+                      variant={
+                        runnerStatus || runnerError ? "destructive" : "default"
+                      }
+                    >
+                      <AlertCircle />
+                      <AlertDescription>{launchBlock}</AlertDescription>
+                    </Alert>
+                  )}
+                  {runtimeInfo && (
+                    <div className="flex items-center gap-3">
+                      <Avatar run={modal.run} />
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <strong>{runtimeInfo.name}</strong>
+                        <code className="text-xs break-all">
+                          {runtimeInfo.command} {runtimeInfo.version}
+                        </code>
+                        <p className="fine-print">{runtimeInfo.note}</p>
+                      </div>
+                    </div>
+                  )}
+                  <Button
+                    type="button"
+                    icon={RefreshCw}
+                    onClick={refreshRunner}
+                  >
+                    重新检测客户端
+                  </Button>
                   <Field label="执行已归属的任务">
                     <NativeSelect
                       name="task_id"
                       required
-                      defaultValue={task?.id || ""}
+                      value={launchTaskId}
+                      onChange={(e) => setLaunchTaskId(e.target.value)}
                     >
                       <option value="" disabled>
                         选择任务
@@ -4187,6 +4297,12 @@ function Modal({
                       CLI。新的定向消息可触发后续执行。会消耗相应账户额度；达到次数预算后自动关闭。
                     </p>
                   </div>
+                  {launchBlock && (
+                    <Alert variant="destructive">
+                      <AlertCircle />
+                      <AlertDescription>{launchBlock}</AlertDescription>
+                    </Alert>
+                  )}
                   <label className="check-field">
                     <Checkbox
                       name="enabled"
@@ -4255,7 +4371,7 @@ function Modal({
               <Button
                 variant="primary"
                 type="submit"
-                disabled={busy}
+                disabled={busy || (kind === "launch" && !!launchBlock)}
                 icon={
                   kind === "launch"
                     ? Play

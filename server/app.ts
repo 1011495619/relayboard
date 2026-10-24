@@ -92,6 +92,7 @@ export function createApp({
       service: "relayboard",
       version,
       authentication: !!token,
+      runners_enabled: runner.enabled,
       data_dir: dataDir,
     }),
   );
@@ -148,8 +149,18 @@ export function createApp({
     });
   });
   app.get("/api/runtimes", async (req, res) =>
-    res.json({ result: await runner.availability() }),
+    res.json({ result: await runner.availability(req.query.refresh === "1") }),
   );
+  app.get("/api/runner/status", async (req, res) =>
+    res.json({ result: await runner.status(req.query.refresh === "1") }),
+  );
+  app.post("/api/runner/preflight", async (req, res) => {
+    const args = z
+      .object({ run_id: z.string(), task_id: z.string() })
+      .strict()
+      .parse(req.body);
+    res.json({ result: await runner.preflight(args) });
+  });
   const skillCatalog: {
     name: string;
     title: string;
@@ -201,16 +212,14 @@ export function createApp({
       },
     }),
   );
-  app.post("/api/runner/start", (req, res) =>
-    res.json({
-      result: runner.start(
-        z
-          .object({ run_id: z.string(), task_id: z.string() })
-          .strict()
-          .parse(req.body),
-      ),
-    }),
-  );
+  app.post("/api/runner/start", async (req, res) => {
+    const args = z
+      .object({ run_id: z.string(), task_id: z.string() })
+      .strict()
+      .parse(req.body);
+    await runner.preflight(args);
+    res.json({ result: runner.start(args) });
+  });
   app.post("/api/runner/stop", (req, res) =>
     res.json({
       result: runner.stop(

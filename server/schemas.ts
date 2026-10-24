@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { runtimeIds } from "./runtimes.ts";
 
 const id = z.string().trim().min(1).max(120);
 const text = z.string().trim().max(12000);
@@ -6,7 +7,7 @@ const short = z.string().trim().min(1).max(240);
 const paths = z.array(z.string().trim().min(1).max(500)).max(80);
 const ids = z.array(id).max(100);
 const version = z.number().int().positive();
-const runtime = z.enum(["codex", "claude", "pi", "other", "human"]);
+const runtime = z.enum(runtimeIds);
 const artifact = z
   .object({
     path: z.string().trim().min(1).max(2000),

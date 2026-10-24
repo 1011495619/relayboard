@@ -55,6 +55,22 @@ JSON
 
 以下本地路径均指安装包或 `npm run build` 生成的 `lib/` JavaScript。开发源码使用 `node --import tsx bin/relayboard.ts ...`；安装包用户直接运行 `relayboard`，无需 TypeScript 运行器。
 
+## 统一客户端目录
+
+侧栏「Agent 接入」提供 13 种本机 CLI 适配器、8 种 MCP 客户端接入指引及 `other` 自定义适配器。完整列表、启动排障与 `runner-profiles.json` 示例见 [README](../README.md#从看板启动-agent)。每个目录项可复制对应客户端格式的 MCP 配置；复制不写入全局设置，按提示合并并保留已有配置。
+
+- Codex：HTTP TOML，令牌通过 `bearer_token_env_var` 指定环境变量。
+- Claude/Cursor/Gemini/Qwen/Cline/Roo/Windsurf/Trae/Kiro/Antigravity 等：标准 `mcpServers` stdio 配置；以客户端所用版本的设置界面为准。
+- OpenCode/Kilo：`mcp`，`type: local`，`command` 参数数组，`environment` 保存环境设置。
+- Amp：`amp.mcpServers`。
+- Continue：可将标准 JSON 保存为 `.continue/mcpServers/relayboard.json`，在 Agent 模式使用。
+- Hermes：将 `mcp_servers` 合并到 `~/.hermes/config.yaml`；生成的 JSON 同样符合 YAML 语法。
+- pi：原生 MCP 能力依版本而定，优先使用下方随包生命周期扩展；标准配置供已有 MCP 扩展使用。托管 CLI 可通过接手包内的 Relayboard CLI 操作共享服务。
+
+Codex/Claude 默认托管配置为本次进程注入 `relayboard_session` HTTP MCP。它与 shell 沙箱内的网络分开，避免只读终端访问不到本地服务时报告中断；不会改写客户端全局配置或沙箱/审批策略。账户、客户端启动和 MCP 工具审批仍按客户端实际配置决定。其他客户端使用已有 MCP 设置或接手包内 CLI；CLI 需要对应会话可访问本地服务。
+
+所有客户端仍遵循同一身份、任务归属、并发范围、原生子 Agent 登记和独立验收规则。品牌图标来自 LobeHub 静态 SVG；当前库缺失的品牌使用首字标识。
+
 ## Codex
 
 在使用中的 MCP 配置中加入以下片段，或在应用的 MCP 设置里添加 Streamable HTTP 服务：

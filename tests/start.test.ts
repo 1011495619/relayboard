@@ -143,3 +143,31 @@ test("CLI reports its version and validates launch arguments before starting", a
     );
   }
 });
+
+test("reusing a disabled running service explains that new environment flags do not replace its execution policy", async (t) => {
+  const dir = temporary(t),
+    messages: string[] = [];
+  const existing = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        service: "relayboard",
+        ok: true,
+        data_dir: dir,
+        runners_enabled: false,
+      }),
+    );
+  });
+  await new Promise<void>((resolve) =>
+    existing.listen(0, "127.0.0.1", resolve),
+  );
+  t.after(() => new Promise((resolve) => existing.close(resolve)));
+  const result = await startServer({
+    port: (existing.address() as AddressInfo).port,
+    dataDir: dir,
+    log: (s) => messages.push(s),
+  });
+  assert.equal(result.reused, true);
+  assert.match(messages.join("\n"), /RELAYBOARD_RUNNERS=0/);
+  assert.match(messages.join("\n"), /先停止原服务/);
+});

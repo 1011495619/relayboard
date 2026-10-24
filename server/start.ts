@@ -38,7 +38,13 @@ export async function startServer({
   const baseUrl = `http://127.0.0.1:${port}`;
   if (port) {
     let existing:
-      { service?: string; ok?: boolean; data_dir?: string } | undefined;
+      | {
+          service?: string;
+          ok?: boolean;
+          data_dir?: string;
+          runners_enabled?: boolean;
+        }
+      | undefined;
     try {
       const response = await fetch(`${baseUrl}/api/health`, {
         signal: AbortSignal.timeout(1000),
@@ -57,6 +63,10 @@ export async function startServer({
           `端口 ${port} 上的 Relayboard 使用其他数据目录。请使用 --port 指定另一端口。`,
         );
       log(`Relayboard 已在运行：${baseUrl}\n数据：${existing.data_dir}`);
+      if (existing.runners_enabled === false)
+        log(
+          "当前服务已关闭进程启动（RELAYBOARD_RUNNERS=0）。如需启动 Agent，请先停止原服务，再用 RELAYBOARD_RUNNERS=1 npm start 启动；复用服务会保留原配置。",
+        );
       if (open) openBrowser(baseUrl);
       return { reused: true as const, url: baseUrl };
     }
@@ -83,6 +93,11 @@ export async function startServer({
   instance.scheduler.start();
   log(
     `Relayboard ${url}\nMCP ${url}/mcp\n数据：${actualDataDir}\n按 Ctrl+C 停止服务，任务记录会保留。`,
+  );
+  log(
+    instance.runner.enabled
+      ? "Agent 手动启动已启用；自动领取仅对明确开启的执行会话生效。"
+      : instance.runner.disabledReason,
   );
   if (open) openBrowser(url);
   let closing: Promise<void> | undefined;

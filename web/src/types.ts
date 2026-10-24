@@ -52,11 +52,7 @@ export interface Integration {
   token_required: boolean;
   skill: string;
 }
-export interface RuntimeInfo {
-  runtime: Runtime;
-  available: boolean;
-  version: string;
-}
+export type { RuntimeInfo } from "../../server/runtimes.ts";
 export type ModalKind =
   | "project"
   | "task"
@@ -79,6 +75,7 @@ export type ModalKind =
   | "worktree"
   | "context";
 interface ModalFields {
+  runtime?: Runtime;
   message?: Message;
   task?: Task;
   parent?: { id: string; runtime?: Runtime; workdir?: string };

@@ -1,6 +1,25 @@
 # 验证记录
 
-当前版本：0.4.1。验证日期：2026-10-25，macOS / Node.js 24。以下先列本次结果，后续章节保留历史证据。
+当前版本：0.5.0。验证日期：2026-10-25，macOS / Node.js 24。以下先列本次结果，后续章节保留历史证据。
+
+## 0.5.0 · Agent 目录与本机启动
+
+- 内部相对 import/export、类型导入和动态导入统一为 `.ts`，编译器 `rewriteRelativeImportExtensions` 生成运行时 `.js`。第三方 SDK 的正式 `.js` 导出路径保留。编译 CLI 与 stdio MCP 不需要 tsx。
+- 统一目录包含13种CLI（Codex、Claude Code、pi、Gemini、OpenCode、Copilot、Cursor、Qwen、Goose、Aider、Kilo、Auggie、Amp）、8种MCP指引（Cline、Roo、Windsurf、Trae、Continue、Kiro、Antigravity、Hermes），另有other自定义CLI和人工。配置覆盖只读取数据目录runner-profiles.json，没有自动安装客户端或改写全局设置。
+- `npm run check`：严格后端/前端/测试类型检查、编译和77/77行为测试通过。受控进程逐一验证13种CLI参数、完整接手包、独立身份、目录、环境、会话ID和退出后保留任务归属；另覆盖禁用/缺失/损坏命令、配置持久重建、MCP配置格式、认证、会话MCP注入、stderr，以及退出0但工具失败时的准确诊断。
+- 原4317服务实际设置RELAYBOARD_RUNNERS=0。已做SQLite一致性备份，保留原库重启0.5.0，health确认runners_enabled=true。既有项目没有启用自动派发或运行中进程，重启未触发额外模型执行。启动器复用禁用服务会明确提示须停止原服务再启用。
+- 实际服务检测到Codex 0.162.1、Claude Code 2.1.132、pi 1.3.0、Gemini 0.63.0、Cursor 2025.10.02-bd871ac。本机5种CLI帮助信息确认所需参数；服务PATH与交互终端可能选中不同版本，以服务检测为准。CLI就绪只表示版本检测，登录/工具权限由客户端执行时确认。
+- ego-browser实际检查：独立禁用服务的弹窗显示原因且submit.disabled=true；主服务网页启动真实Codex；筛选得到8个MCP、5个本机就绪客户端；搜索OpenCode并点击复制配置成功；登记弹窗预选opencode。1200浅色与390深色无文档横向溢出。LobeHub SVG随网页离线构建；所用库缺少Aider/Auggie/Continue图标，使用名称首字，未冒用其他品牌。
+
+- 0.5.0 tgz 在独立 npm 缓存经真实 npx 安装启动：预构建资源、7 个 Skills、stdio MCP、恢复/步骤/验证/提交协议、重启恢复和重复启动复用全部通过；测试使用受控身份，没有新增厂商模型推理。
+
+### 真实Codex执行及当前边界
+
+只读fixture预先登记协调者和独立子Run，从网页实际启动Codex。第一次真实退出0，但shell沙箱访问本机服务fetch failed，未读取文件/报告进度。按OpenAI官方MCP和CLI文档，为Codex/Claude默认适配器增加仅本进程的relayboard_session HTTP MCP，令牌引用环境变量；不修改全局配置、终端沙箱或审批策略。
+
+第二次使用新子Run并显式交接。日志确认连接relayboard_session并尝试relay_work_start，随后客户端返回：`MCP tool call requires approval, but approval policy is never`。进程退出0，任务仍未提交。已询问用户是否许可仅限Relayboard协作工具的会话审批；未获许可时保留原策略，不反复调用模型。旧全局relayboard配置仍指向迁移前bin/mcp.js；新的配置复制入口给出当前lib路径或HTTP，旧全局设置保持原样。
+
+本轮未声称Claude、pi或其他厂商的实际推理全部成功；受控适配器契约测试与账户、客户端权限是不同证据。完整检查、状态、截图、安装包smoke见外部交付目录relayboard-evidence-0.5.0。
 
 ## 0.4.1 · 历史关注事项闭环
 

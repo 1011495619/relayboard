@@ -236,7 +236,7 @@ test("stdio MCP bridge and CLI use the same authenticated HTTP state", async (t)
 
 test("managed native process gets a packet, reports through API, captures session ID and exits without auto-acceptance", async (t) => {
   const fixtureCode = `
-    console.log(JSON.stringify({type:'system',subtype:'init',session_id:'fixture-session'}));
+    console.log(JSON.stringify({type:'thread.started',thread_id:'fixture-session'}));
     const request = async (path, body) => { const r = await fetch(process.env.RELAYBOARD_URL+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const v=await r.json(); if(!r.ok) throw Error(JSON.stringify(v)); return v.result; };
     const task = await request('/api/query',{query:'task',args:{task_id:process.env.RELAYBOARD_TASK_ID}});
     await request('/api/command',{operation:'task_checkpoint',args:{task_id:task.id,run_id:process.env.RELAYBOARD_RUN_ID,claim_epoch:task.claim_epoch,summary:'fixture process saved progress',artifacts:[{path:'fixture-report.txt'}],verification:[{command:'fixture-check',passed:true,result:'fixture process executed'}]}});
