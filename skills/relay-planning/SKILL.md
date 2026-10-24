@@ -28,6 +28,6 @@ Use `relay_task_split` on your own task within its boundary. It converts the par
 
 For someone else's claimed task, use `relay_proposal_create` and wait for owner/human resolution. Manual-planning projects require human confirmation. Always supply your actual actor identity. Scope expansion uses `relay_scope_request`, with upstream boundaries expanded first. Keep the entire descendant tree within project depth/concurrency budgets.
 
-Dispatch explicit leaf tasks. Their executors use `work_start` → read guide → `work_report recover` → current step. Plan or contract changes require fresh recovery; communicate the reason and preserve useful completed-work evidence. Do not silently take ownership or treat the coordinator as an exclusive writer of the whole subtree.
+Dispatch explicit leaf tasks. Their executors use `work_start` → read guide → `work_report recover` → current step. Plan or contract changes require fresh recovery; communicate the reason and preserve useful completed-work evidence. Requirement/contract changes conservatively reset the affected task’s steps for re-execution; a pure unchanged-contract handoff preserves completed steps. Do not silently take ownership or treat the coordinator as an exclusive writer of the whole subtree.
 
 Leave a planning checkpoint naming confirmed decisions, unresolved proposals and the next action. Planning completion is not implementation acceptance. For commits, apply [git-commit-style](../git-commit-style/SKILL.md).

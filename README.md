@@ -153,7 +153,7 @@ relayboard call relay_work_start - <<'JSON'
 JSON
 ```
 
-先通过 `relay_agent_register` 取得 `run.id`。每次报告复制最新指引返回的 `handle`（任务、Run、执行权、任务版本及上下文摘要），不手工猜版本。`recover` 阶段检查实际工作区、分支、未提交改动、相关进程与成果；读完所需决定后填 `read_decision_ids`，依赖成果实际进入本地后才填写 `dependency_receipts`：revision 复制指引中的服务成果摘要（并非 Git hash），note 说明实际接收和核验过程。契约省略时用 `relay_decisions` 按 task_id 分页读全，再填全部必要的已读 ID。旧聊天中的“测试通过”只证明当时的版本。恢复核验与契约确认属于执行者报告，服务观察到 Git 状态也不等于服务亲自运行过测试。
+先通过 `relay_agent_register` 取得 `run.id`。每次报告复制最新指引返回的 `handle`（任务、Run、执行权、任务版本及上下文摘要），不手工猜版本。`next_action.arguments` 故意不填写 summary/observed，按 `required_fields` 添加实际观察后再报告；原样照抄参数会校验失败。`recover` 阶段检查实际工作区、分支、未提交改动、相关进程与成果；读完所需决定后填 `read_decision_ids`，依赖成果实际进入本地后才填写 `dependency_receipts`：revision 复制指引中的服务成果摘要（并非 Git hash），note 说明实际接收和核验过程。依赖有省略时，用 `relay_work_dependencies {task_id, offset, limit}` 逐页读到 next_offset 为 null；每项含 receipt 所需的 revision。契约省略时用 `relay_decisions` 按 task_id 分页读全，再填全部必要的已读 ID。旧聊天中的“测试通过”只证明当时的版本。恢复核验与契约确认属于执行者报告，服务观察到 Git 状态也不等于服务亲自运行过测试。
 
 任务创建、更新和拆分可以提供 `execution`，例如：
 
@@ -172,9 +172,11 @@ JSON
 }
 ```
 
-步骤 ID 保持唯一、稳定。没有执行说明的旧任务仍可按验收标准和检查点继续。指引给出 `recover`、`execute`、`blocked`、`verify`、`submit`、`review`、`wait_children`、`done` 或 `unavailable` 阶段；读取实际 `next_action`，报告中填真实结果，不把模板占位文字当作证据。契约、计划或依赖变化后按新指引重新核验。所有步骤完成仍需实际验证与独立验收。没有步骤计划时，执行就绪后用 `progress` 和 `ready_for_verification: true` 进入验证；`verify` 必须包含实际执行的非空 verification 记录，失败后可修正再试。
+步骤 ID 保持唯一、稳定。没有执行说明的旧任务仍可按验收标准和检查点继续。指引给出 `recover`、`execute`、`blocked`、`verify`、`submit`、`review`、`wait_children`、`done` 或 `unavailable` 阶段；读取实际 `next_action`，报告中填真实结果，不把模板占位文字当作证据。契约、计划或依赖变化后按新指引重新核验；需求或契约变化会保守重置受影响任务的步骤，纯交接且需求未变则保留已完成步骤。所有步骤完成仍需实际验证与独立验收。没有步骤计划时，执行就绪后用 `progress` 和 `ready_for_verification: true` 进入验证；`verify` 必须包含实际执行的非空 verification 记录，失败后可修正再试。guided verify 的列表是本次完整的当前检查快照，替换旧当前列表，必须包含全部必要检查和失败项；旧失败保留在事件历史，原低层 task_checkpoint 仍按原有规则合并。
 
-接手包优先保留目标、约束和当前行动。遇到 `truncated` 或遗漏提示，先按引用读取完整任务、决定或依赖，再确认已读。记录已存在不等于它已在当前工作区被接收；不同 worktree 的成果需要明确集成。
+接手包优先保留目标、约束和当前行动。整个指引 JSON 用顶层 `truncated`、`omissions` 和 `char_budget` 标明预算与省略（有效下限 6000 字符），其中 context 也有自己的 truncated。任一层有省略时，先按引用读取完整任务、决定或依赖，再确认已读。记录已存在不等于它已在当前工作区被接收；不同 worktree 的成果需要明确集成。
+
+未处理请求通过 `relay_work_requests {task_id, offset, limit}` 分页恢复，包含当前任务、祖先任务以及发给旧负责人的 request/blocker。返回 items/total/next_offset，继续到 next_offset 为 null。`message_ack` 只记已读；实际处理后用 `message_resolve {message_id, run_id, note}` 记录结论，任务现负责人可以处理继承请求。
 
 保存事实要发生在失去上下文之前。定期报告失败尝试、结果未知的操作和下一步；支持的钩子导出已经保存的状态，不会凭空恢复未汇报进度。对于上游直接拒绝超限请求的情况，应依靠之前的持续检查点恢复。新执行者遇到模糊步骤、缺少能力、范围不足或契约冲突时报告阻塞，不自行扩张任务。
 

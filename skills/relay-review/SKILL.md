@@ -13,7 +13,7 @@ Read the submitted task, acceptance, execution instructions, relevant decisions,
 
 Use a different reviewer Run or human acceptance. Inspect the actual files, commit/worktree and dependent interfaces. Reproduce checks appropriate to the change. A service-observed revision identifies code state; it does not certify agent-reported commands were executed or that semantic correctness follows.
 
-Check evidence freshness against the delivered code. Old logs only establish their recorded version/time. Inspect failed attempts and uncertain actions rather than treating a complete step checklist as proof. Missing required artifacts, unresolved blockers or stale verification need a concrete correction.
+Check evidence freshness against the delivered code. Old logs only establish their recorded version/time. Inspect failed attempts and uncertain actions rather than treating a complete step checklist as proof. Guided verify supplies the full current check snapshot (including failures); it replaces that current list while historical results remain in events. Check the full required checks, not only a passing subset. Missing required artifacts, unresolved blockers or stale verification need a concrete correction.
 
 For commits, apply [git-commit-style](../git-commit-style/SKILL.md): single purpose, allowed type, title within 50 characters and Chinese rationale. Review the diff as well as its message.
 
@@ -21,6 +21,6 @@ For commits, apply [git-commit-style](../git-commit-style/SKILL.md): single purp
 
 Use `relay_task_review` with your own `reviewer_run_id`, latest `expected_version`, accepted result and an evidence-based note. Accept only when the full task acceptance is supported. Otherwise return with specific observations, affected artifacts and next correction. The implementing Run does not self-accept.
 
-For a coordinator, check all required children are accepted, exact delivered revisions are integrated and a fresh passing integration checkpoint was saved after child acceptance. Child success alone is insufficient. Preserve review conclusions in durable messages/decisions; “acknowledged” only records receipt of a message.
+For a coordinator, check all required children are accepted, exact delivered revisions are integrated and a fresh passing integration checkpoint was saved after child acceptance. Child success alone is insufficient. Preserve review conclusions in durable messages/decisions; “acknowledged” only records reading a message; message_resolve stores its handling conclusion. Use paged work_requests to inspect unresolved task/ancestor requests, including old-owner requests.
 
 For independent recovery trials, give the new executor only the service connection, assigned task and relevant Skill. Record actual model/client, human interventions, missed constraints, repeated work and final acceptance. Do not describe a Codex trial as a smaller-model or Claude/pi trial.

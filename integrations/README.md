@@ -37,9 +37,9 @@ JSON
 
 ## 统一恢复入口
 
-登记后用 `work_start` 取得阶段和下一步。先读目标、约束、警告、契约与依赖；核对实际 cwd、分支、改动、进程和成果。使用返回的最新 `handle` 调用 `work_report`，`kind: "recover"` 填实际观察、完整读过的 `read_decision_ids` 和依赖成果实际进入本地后的 `dependency_receipts`。receipt 的 revision 使用 guide.dependencies 中的服务成果摘要（并非 Git hash），note 说明实际如何接收并确认本地已有成果。指引省略决定时，按 task_id 分页读取全部相关决定再确认。确认恢复后只做当前步骤，报告其观察结果，再读下一步。
+登记后用 `work_start` 取得阶段和下一步。检查顶层 truncated/omissions/char_budget（整个指引 JSON 有效预算至少 6000 字符）及 context.truncated，任一层省略都要补读。先读目标、约束、警告、契约与依赖；核对实际 cwd、分支、改动、进程和成果。使用返回的最新 `handle` 调用 `work_report`，`kind: "recover"` 填实际观察、完整读过的 `read_decision_ids` 和依赖成果实际进入本地后的 `dependency_receipts`。receipt 的 revision 使用 guide.dependencies 中的服务成果摘要（并非 Git hash），note 说明实际如何接收并确认本地已有成果。指引省略决定时，按 task_id 分页读取全部相关决定再确认。依赖省略时用 work_dependencies {task_id, offset, limit} 读全每项 revision，未处理请求用 work_requests 同参数读全（含祖先和旧 owner 请求）；两者返回 items/total/next_offset，翻页到 null。message_ack 仅已读，处理后 message_resolve {message_id, run_id, note} 记结论，现 owner 可处理继承请求。确认恢复后只做当前步骤，报告其观察结果，再读下一步。
 
-报告种类为 `recover`、`progress`、`step`、`blocked`、`verify`、`submit`。不要重用过期 handle；归属、契约、计划或依赖变化时重新获取指引。`work_start` 只恢复自身工作或领取合适任务，转交其他 Run 的任务仍需显式 handoff。旧服务缺少新工具时，使用 `eligible`/`task_claim`/`task_checkpoint`/`task_submit`，交接后先 `task_reconcile`。
+报告种类为 `recover`、`progress`、`step`、`blocked`、`verify`、`submit`。next_action.arguments 故意省略 summary/observed，按 required_fields 填真实观察后再提交；完整照抄模板会校验失败。不要重用过期 handle；归属、契约、计划或依赖变化时重新获取指引。`work_start` 只恢复自身工作或领取合适任务，转交其他 Run 的任务仍需显式 handoff。guided verify 提交本次完整当前检查快照（包含失败），替换旧当前列表；历史失败仍在事件中。需求/契约变化后 recover 并重走保守重置的任务步骤，纯交接且契约不变保留步骤。旧服务缺少新工具时，使用 `eligible`/`task_claim`/`task_checkpoint`/`task_submit`，交接后先 `task_reconcile`。
 
 ### 客户端能力边界
 

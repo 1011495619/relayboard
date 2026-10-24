@@ -23,10 +23,13 @@ Call `relay_task_handoff` using latest expected version, source identity, destin
 
 1. Call `relay_work_start` with the new Run and assigned task after transfer. It does not itself take an occupied task.
 2. Read the guide and missing referenced records. Inspect actual cwd, branch, changes, processes and artifacts; investigate uncertain external operations before repeating them.
-3. Read required decisions in full. Receive the exact dependency revisions into this worktree and record receipts; accepted upstream tasks may live on other branches.
+3. Read required decisions in full. Page `relay_work_dependencies` until next_offset is null when the guide omits dependencies. Receive the exact dependency artifacts into this worktree and record receipts using their service revision; accepted upstream tasks may live on other branches.
 4. Report `kind: "recover"` with the new guide's handle, observed facts, read decision IDs and actual dependency receipts. Follow refreshed guides when contracts, plans or dependencies change.
-5. Execute the current step, report its observed result and continue from the service's next action.
+5. Page `relay_work_requests` to recover unresolved task/ancestor requests, including those sent to the old owner. `message_ack` records reading; the current task owner records actual processing with `message_resolve {message_id, run_id, note}`.
+6. Execute the current step, report its observed result and continue from the service's next action.
 
-On an older service, read context/inbox and use `relay_task_reconcile` with observed facts and next step before writes. Keep unresolved discrepancies as blockers. When the service is unreachable, save a local checkpoint and restore connectivity before ownership changes or new parallel dispatch; use the shared database once reconnected.
+A pure ownership handoff preserves completed steps when requirements are unchanged; changed requirements/contracts require recover and conservatively reset the affected task’s steps. Keep unresolved discrepancies as blockers.
+
+On an older service, read context/inbox and use `relay_task_reconcile` with observed facts and next step before writes. When the service is unreachable, save a local checkpoint and restore connectivity before ownership changes or new parallel dispatch; use the shared database once reconnected.
 
 Carry exact commits, worktrees and uncommitted state. Apply [git-commit-style](../git-commit-style/SKILL.md) to subsequent commits. A capable recovery process reduces reliance on remembered chat; complex technical judgments may still need escalation to a suitable executor.

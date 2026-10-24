@@ -27,7 +27,17 @@ The handle includes task/Run IDs, claim epoch, task version and a context_versio
 | done | No further implementation; new work needs a new task. |
 | unavailable | Read eligibility/ownership reasons; coordinate instead of taking occupied work. |
 
-`next_action.arguments` is a template requiring real observations where indicated. Fill actual facts, never repeat instructional placeholders as evidence. Read `warnings`, packet omissions and full required decisions before acknowledging them. “Dependency done” is not a local integration receipt.
+`next_action.arguments` deliberately omits summary/observed. `next_action.required_fields` lists facts you must add after doing the work; copying the arguments unchanged fails report validation. Preserve the returned handle unchanged and never guess a missing digest. Read `warnings`, packet omissions and full required decisions before acknowledging them. “Dependency done” is not a local integration receipt.
+
+## Bounded guides and paged recovery
+
+Guide-level `truncated`, `omissions` and `char_budget` describe the whole JSON response budget, with an effective minimum of 6000 characters; context also has its own truncation flag. Check both layers. Any omission requires following the stated reads before acting; increasing a budget does not substitute for reading full required contracts.
+
+- `relay_work_dependencies {task_id, offset, limit}` returns `{items, total, next_offset}`. Every dependency item includes its service revision. If the guide dependency list is incomplete, fetch pages until next_offset is null; use each received item’s revision for receipts.
+- `relay_work_requests {task_id, offset, limit}` returns `{items, total, next_offset}` for unresolved request/blocker messages on the task and its ancestors, including old-owner messages. Fetch all pages when recovering pending work.
+- `relay_message_ack` records read receipt only. After actually handling a request, call `relay_message_resolve {message_id, run_id, note}`. The current task owner can resolve inherited requests with a concrete handling note.
+
+Both page tools accept limit 1–20 and offset starting at zero. Continue from the returned next_offset, not a guessed count. Reading or resolving a request does not grant extra write scope.
 
 ## Terminal example
 
@@ -60,7 +70,9 @@ Copy the returned handle unchanged into the next report. The example below illus
 
 Dependency revision is the service-generated artifact digest from `guide.dependencies`, not a Git hash. Copy that revision into the receipt and explain in note how you verified the actual artifacts are received locally. Required `read_decision_ids` must cover every relevant decision, including records omitted from the bounded guide: fetch `relay_decisions` with task_id and follow all pages before acknowledging. Discover current schema if uncertain. Progress reports can preserve `facts`, `failed_attempts`, `uncertain_actions`, `next_step`, artifact paths and real verification. Results supplied by an agent are self-reported; a service-observed Git fingerprint alone does not establish test execution.
 
-For tasks without an execution plan, save `progress` with `ready_for_verification: true` only when implementation is ready for checks. Planned tasks become ready after all ordered steps complete. A `verify` report requires a nonempty verification array with actual command/result/pass values. Failed checks can be corrected and retried. The service labels supplied test results agent_reported and can mark evidence stale after observed Git changes.
+For tasks without an execution plan, save `progress` with `ready_for_verification: true` only when implementation is ready for checks. Planned tasks become ready after all ordered steps complete. A `verify` report requires a nonempty verification array with actual command/result/pass values. Its list is the complete current verification snapshot, replacing the prior current list; include all required checks and failures, not only passing entries. Historical failures remain in events. Low-level task_checkpoint retains its existing merge behavior. Failed checks can be corrected and retried. The service labels supplied test results agent_reported and can mark evidence stale after observed Git changes.
+
+Requirement or contract changes require fresh recover and conservatively reset the affected task’s completed steps. A pure ownership handoff with unchanged requirements retains steps, while the new Run must still recover actual state.
 
 ## Coordination and old-service fallback
 

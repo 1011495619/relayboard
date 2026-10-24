@@ -22,9 +22,9 @@ Children preserve their own progress and send blockers/delivery to parents throu
 
 ## Checkpoint and communicate
 
-Report actual progress before compaction, delegation, long operations or exit when model execution is available. Hooks export records already saved; they do not reconstruct unsaved conversation facts. Record concrete next action, failed attempts, unknown operations and evidence locations. Keep large logs as references. A service-observed revision identifies code, not proof of test execution.
+Report actual progress before compaction, delegation, long operations or exit when model execution is available. Hooks export records already saved; they do not reconstruct unsaved conversation facts. Record concrete next action, failed attempts, unknown operations and evidence locations. Keep large logs as references. A service-observed revision identifies code, not proof of test execution. Guided verify replaces the current verification snapshot with the complete required check list, including failures; old failures remain in event history.
 
-Read the directed inbox between steps. Acknowledge received messages, respond to requests and persist confirmed agreements as decisions. Receipt does not mean resolution. External idle clients require polling or a supported wakeup adapter/runner. Do not imply messages wake every client.
+Read the directed inbox between steps. Acknowledge received messages, use work_requests pages for unresolved task/ancestor requests and message_resolve for actual handling, respond to requests and persist confirmed agreements as decisions. Receipt does not mean resolution. External idle clients require polling or a supported wakeup adapter/runner. Do not imply messages wake every client.
 
 ## Deliver and review
 
@@ -34,6 +34,6 @@ Follow guide stages, preserve failure evidence and submit actual artifacts/check
 
 Checkpoint while the old session can report. Stop old writers and observe exit before handoff; heartbeat expiry proves neither exit nor release. Explicitly preserve active descendants and redirect reporting, or stop/release them with evidence. Unknown external writers need confirmed stop for a shared directory, or an isolated destination with uncertainty and integration plan.
 
-Register the new session, hand off with current version and descendant policy, and let the new Run read work_start's recover guide. Inspect actual files/branch/processes, read full contracts, receive exact dependency revisions, investigate unknown results and report recover using the new handle. Changed contract/plan/dependency signatures require renewed recovery. The old epoch is fenced. On old services use task_reconcile.
+Register the new session, hand off with current version and descendant policy, and let the new Run read work_start's recover guide. Inspect actual files/branch/processes, read full contracts, receive exact dependency revisions, investigate unknown results and report recover using the new handle. Changed contract/plan/dependency signatures require renewed recovery. Requirement/contract changes conservatively reset the affected task’s steps; a pure unchanged-contract handoff keeps completed steps. Read all work_dependencies pages and unresolved work_requests pages, including old-owner requests. Acknowledge reading separately from message_resolve processing notes. The old epoch is fenced. On old services use task_reconcile.
 
 If disconnected, save a local checkpoint with IDs, last known state, facts and next step. Restore connection before shared ownership changes or new dispatch; do not create a competing task database. Reduced context and orderly steps support weaker executors, while hard technical judgments still require a suitable agent or human.
