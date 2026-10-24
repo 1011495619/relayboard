@@ -1,7 +1,22 @@
 import type {
-  Artifact, CommandArgs, Runtime, TaskFields, Verification,
+  Artifact,
+  CommandArgs,
+  Runtime,
+  TaskFields,
+  Verification,
+  DependencyReceipt,
+  ExecutionStep,
+  WorkHandle,
 } from "./schemas.js";
-export type { Artifact, Verification, Runtime } from "./schemas.js";
+export type {
+  Artifact,
+  Verification,
+  Runtime,
+  ExecutionPlan,
+  ExecutionStep,
+  WorkHandle,
+  DependencyReceipt,
+} from "./schemas.js";
 
 export interface VersionedRecord {
   id: string;
@@ -9,7 +24,8 @@ export interface VersionedRecord {
   created_at: string;
   updated_at?: string;
 }
-export interface Project extends VersionedRecord, CommandArgs<"project_create"> {
+export interface Project
+  extends VersionedRecord, CommandArgs<"project_create"> {
   project_id?: never;
 }
 export interface Agent extends VersionedRecord {
@@ -63,7 +79,30 @@ export interface Run extends VersionedRecord {
   dispatch?: DispatchInfo;
   provider_session_id?: string;
 }
-export type TaskStatus = "pending" | "doing" | "blocked" | "review" | "reconcile" | "done";
+export type TaskStatus =
+  "pending" | "doing" | "blocked" | "review" | "reconcile" | "done";
+export interface WorkspaceEvidence {
+  source: "service_observed_git" | "unavailable";
+  workdir: string;
+  revision: string | null;
+  fingerprint: string | null;
+  observed_at: string;
+  reason?: string;
+  verification_source: "agent_reported";
+}
+export interface WorkflowState {
+  recovered_epoch: number;
+  recovered_signature: string;
+  recovered_at: string;
+  observed: string;
+  plan_signature: string;
+  completed_steps: string[];
+  facts: string[];
+  failed_attempts: string[];
+  uncertain_actions: string[];
+  ready_for_verification: boolean;
+  dependency_receipts: DependencyReceipt[];
+}
 export interface Checkpoint {
   summary: string;
   next_step: string;
@@ -71,7 +110,11 @@ export interface Checkpoint {
   at: string;
   run_id: string;
   verification_current?: boolean;
-  required_children_at_checkpoint?: {id: string; status: TaskStatus; version: number}[];
+  required_children_at_checkpoint?: {
+    id: string;
+    status: TaskStatus;
+    version: number;
+  }[];
 }
 export interface Handoff {
   from_run_id: string;
@@ -92,6 +135,8 @@ export interface Task extends VersionedRecord, TaskFields {
   owner_run_id: string | null;
   claim_epoch: number;
   checkpoint: Checkpoint | null;
+  workflow?: WorkflowState;
+  evidence?: WorkspaceEvidence;
   artifacts: Artifact[];
   verification: Verification[];
   claimed_at?: string;
@@ -106,19 +151,25 @@ export interface Task extends VersionedRecord, TaskFields {
 }
 export interface Message extends VersionedRecord, CommandArgs<"message_send"> {
   acknowledged_at: string | null;
+  resolved_at?: string;
+  resolved_by?: string;
+  resolution?: string;
   system?: boolean;
 }
-export interface Decision extends VersionedRecord, CommandArgs<"decision_record"> {}
+export interface Decision
+  extends VersionedRecord, CommandArgs<"decision_record"> {}
 interface ProposalState extends VersionedRecord {
   project_id: string;
   status: "pending" | "approved" | "declined";
   resolution?: string;
   resolved_at?: string;
 }
-export interface SplitProposal extends ProposalState, CommandArgs<"proposal_create"> {
+export interface SplitProposal
+  extends ProposalState, CommandArgs<"proposal_create"> {
   type: "split";
 }
-export interface ScopeProposal extends ProposalState, CommandArgs<"scope_request"> {
+export interface ScopeProposal
+  extends ProposalState, CommandArgs<"scope_request"> {
   type: "scope";
   expected_version: number;
 }
@@ -167,7 +218,7 @@ export interface ContextPacket {
   markdown: string;
   truncated: boolean;
   omissions: string[];
-  references: {project_id: string; task_id: string};
+  references: { project_id: string; task_id: string };
   total_chars: number;
 }
 export interface TaskDetail extends Task {
@@ -177,16 +228,85 @@ export interface TaskDetail extends Task {
   proposals: Proposal[];
 }
 export interface Snapshot {
+  attention?: {
+    requests_total: number;
+    request_counts: Record<string, number>;
+    recovery_task_ids: string[];
+  };
   project: Project;
   tasks: Task[];
   agents: Agent[];
-  runs: (Run & { liveness: "reported" | "unconfirmed" | "ended" | "unknown" })[];
+  runs: (Run & {
+    liveness: "reported" | "unconfirmed" | "ended" | "unknown";
+  })[];
   messages: Message[];
   decisions: Decision[];
   proposals: Proposal[];
   events: RelayEvent[];
 }
+export type WorkStage =
+  | "recover"
+  | "execute"
+  | "blocked"
+  | "verify"
+  | "submit"
+  | "review"
+  | "wait_children"
+  | "done"
+  | "unavailable";
+export interface WorkGuide {
+  truncated: boolean;
+  omissions: string[];
+  char_budget: number;
+  run_id: string;
+  task: Task | null;
+  stage: WorkStage;
+  headline: string;
+  handle: WorkHandle | null;
+  next_action: {
+    tool: string;
+    reason: string;
+    arguments: Record<string, unknown>;
+    required_fields?: string[];
+  };
+  checklist: string[];
+  current_step: ExecutionStep | null;
+  completed_steps: string[];
+  context: ContextPacket | null;
+  decisions: Decision[];
+  dependencies: {
+    id: string;
+    short_id: string;
+    title: string;
+    status: TaskStatus;
+    version: number;
+    revision: string;
+    artifacts: Artifact[];
+    received: boolean;
+  }[];
+  dependency_page: { total: number; next_offset: number | null };
+  request_page: { total: number; next_offset: number | null };
+  messages: Message[];
+  warnings: string[];
+  choices: {
+    task_id: string;
+    title: string;
+    eligible: boolean;
+    reasons: string[];
+  }[];
+}
 export interface QueryResults {
+  work_next: WorkGuide;
+  work_requests: {
+    items: Message[];
+    total: number;
+    next_offset: number | null;
+  };
+  work_dependencies: {
+    items: WorkGuide["dependencies"];
+    total: number;
+    next_offset: number | null;
+  };
   project: Project;
   projects: (Project & { task_count: number; done_count: number })[];
   decisions: { items: Decision[]; total: number; next_offset: number | null };
@@ -198,6 +318,8 @@ export interface QueryResults {
   context: ContextPacket;
 }
 export interface CommandResults {
+  work_start: WorkGuide;
+  work_report: WorkGuide;
   project_create: Project;
   project_update: Project;
   agent_register: { agent: Agent; run: Run };
@@ -213,7 +335,10 @@ export interface CommandResults {
   task_review: Task;
   task_split: { parent: Task; children: Task[] };
   proposal_create: SplitProposal;
-  proposal_resolve: { proposal: Proposal; split: {parent: Task; children: Task[]} | null };
+  proposal_resolve: {
+    proposal: Proposal;
+    split: { parent: Task; children: Task[] } | null;
+  };
   scope_request: ScopeProposal;
   scope_resolve: { proposal: Proposal; task: Task };
   task_handoff: Task;
@@ -221,6 +346,7 @@ export interface CommandResults {
   task_release: Task;
   message_send: Message;
   message_ack: Message;
+  message_resolve: Message;
   decision_record: Decision;
 }
 

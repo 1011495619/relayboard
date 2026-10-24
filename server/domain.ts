@@ -1,10 +1,50 @@
 import { randomUUID, createHash } from "node:crypto";
 import { resolve, posix, isAbsolute, dirname, basename } from "node:path";
 import { realpathSync } from "node:fs";
+import {
+  workGuide,
+  relevantDecisions,
+  relatedTasks,
+  dependencies,
+  dependencyItems,
+  requirementsSignature,
+  recoverySignature,
+  needsRecovery,
+  emptyWorkflow,
+  planSignature,
+  artifactRevision,
+  evidenceStale,
+  pendingRequests,
+} from "./workflow.js";
+import { observeWorkspace } from "./workspace.js";
 import { commands, queries } from "./schemas.js";
-import type { CommandName, CommandArgs, CommandInput, QueryName, QueryArgs, QueryInput, TaskFields } from "./schemas.js";
+import type {
+  CommandName,
+  CommandArgs,
+  CommandInput,
+  QueryName,
+  QueryArgs,
+  QueryInput,
+  TaskFields,
+} from "./schemas.js";
 import type { Store } from "./store.js";
-import type { RecordKind, RecordMap, VersionedRecord, Task, Run, RelayEvent, ScopeConflict, Eligibility, CommandResults, QueryResults, ContextPacket, Project, Agent, SplitProposal, ScopeProposal } from "./types.js";
+import type {
+  RecordKind,
+  RecordMap,
+  VersionedRecord,
+  Task,
+  Run,
+  RelayEvent,
+  ScopeConflict,
+  Eligibility,
+  CommandResults,
+  QueryResults,
+  ContextPacket,
+  Project,
+  Agent,
+  SplitProposal,
+  ScopeProposal,
+} from "./types.js";
 
 const ACTIVE = new Set(["doing", "blocked", "review", "reconcile"]);
 const now = () => new Date().toISOString();
@@ -30,17 +70,29 @@ export class AppError extends Error {
   code: string;
   status: number;
   details: unknown;
-  constructor(code: string, message: string, status = 409, details: unknown = undefined) {
+  constructor(
+    code: string,
+    message: string,
+    status = 409,
+    details: unknown = undefined,
+  ) {
     super(message);
     this.code = code;
     this.status = status;
     this.details = details;
   }
 }
-function ensure(ok: unknown, code: string, message: string, details?: unknown): asserts ok {
+function ensure(
+  ok: unknown,
+  code: string,
+  message: string,
+  details?: unknown,
+): asserts ok {
   if (!ok) throw new AppError(code, message, 409, details);
 }
-function runIdPresent(id: string | null): id is string { return id !== null; }
+function runIdPresent(id: string | null): id is string {
+  return id !== null;
+}
 function scopePath(s: string) {
   ensure(
     !s.includes("\\") &&
@@ -65,7 +117,11 @@ export class Service {
     if (!item) throw new AppError("NOT_FOUND", `${kind} ${id} 不存在`, 404);
     return item;
   }
-  sameProject<K extends RecordKind>(project: string, kind: K, id: string): RecordMap[K] {
+  sameProject<K extends RecordKind>(
+    project: string,
+    kind: K,
+    id: string,
+  ): RecordMap[K] {
     const item = this.get(kind, id);
     ensure(
       (item.project_id || item.id) === project,
@@ -74,7 +130,11 @@ export class Service {
     );
     return item;
   }
-  update<K extends RecordKind>(kind: K, item: RecordMap[K], fields: Partial<RecordMap[K]>): RecordMap[K] {
+  update<K extends RecordKind>(
+    kind: K,
+    item: RecordMap[K],
+    fields: Partial<RecordMap[K]>,
+  ): RecordMap[K] {
     return this.store.put(kind, {
       ...item,
       ...fields,
@@ -123,7 +183,11 @@ export class Service {
       );
     }
   }
-  currentClaim(task: Task, args: { run_id: string; claim_epoch: number }, allowReconcile = false) {
+  currentClaim(
+    task: Task,
+    args: { run_id: string; claim_epoch: number },
+    allowReconcile = false,
+  ) {
     ensure(
       task.owner_run_id === args.run_id &&
         task.claim_epoch === args.claim_epoch,
@@ -163,7 +227,11 @@ export class Service {
     while (changed) {
       changed = false;
       for (const r of runs)
-        if (r.parent_run_id !== null && ids.has(r.parent_run_id) && !ids.has(r.id)) {
+        if (
+          r.parent_run_id !== null &&
+          ids.has(r.parent_run_id) &&
+          !ids.has(r.id)
+        ) {
           ids.add(r.id);
           changed = true;
         }
@@ -234,7 +302,11 @@ export class Service {
     }
     const graph = new Map(this.tasks(project).map((t) => [t.id, t]));
     graph.set(task.id, task);
-    const visit = (id: string, stack = new Set<string>(), done = new Set<string>()): void => {
+    const visit = (
+      id: string,
+      stack = new Set<string>(),
+      done = new Set<string>(),
+    ): void => {
       ensure(!stack.has(id), "DEPENDENCY_CYCLE", "依赖关系形成循环");
       if (done.has(id)) return;
       stack.add(id);
@@ -355,8 +427,16 @@ export class Service {
       conflicts,
     };
   }
-  execute<K extends string>(op: K, input: K extends CommandName ? NoInfer<CommandInput<K>> : unknown, requestId?: string): K extends CommandName ? CommandResults[K] : CommandResults[CommandName];
-  execute(op: string, input: unknown = {}, requestId?: string): CommandResults[CommandName] {
+  execute<K extends string>(
+    op: K,
+    input: K extends CommandName ? NoInfer<CommandInput<K>> : unknown,
+    requestId?: string,
+  ): K extends CommandName ? CommandResults[K] : CommandResults[CommandName];
+  execute(
+    op: string,
+    input: unknown = {},
+    requestId?: string,
+  ): CommandResults[CommandName] {
     const command = commands[op as CommandName];
     if (!command) throw new AppError("UNKNOWN_COMMAND", `未知操作 ${op}`, 400);
     const args = command.schema.parse(input);
@@ -377,35 +457,74 @@ export class Service {
         }
       }
       // The schema and handler are selected by the same checked operation key.
-      const handler = this[op as CommandName] as (value: typeof args) => CommandResults[CommandName];
+      const handler = this[op as CommandName] as (
+        value: typeof args,
+      ) => CommandResults[CommandName];
       const result = handler.call(this, args);
       if (requestId) this.store.saveReceipt(requestId, digest, result);
       return result;
     });
     return result;
   }
-  query<K extends string>(name: K, ...args: K extends QueryName ? {} extends QueryInput<K> ? [input?: NoInfer<QueryInput<K>>] : [input: NoInfer<QueryInput<K>>] : [input?: unknown]): K extends QueryName ? QueryResults[K] : QueryResults[QueryName];
+  query<K extends string>(
+    name: K,
+    ...args: K extends QueryName
+      ? {} extends QueryInput<K>
+        ? [input?: NoInfer<QueryInput<K>>]
+        : [input: NoInfer<QueryInput<K>>]
+      : [input?: unknown]
+  ): K extends QueryName ? QueryResults[K] : QueryResults[QueryName];
   query(name: string, input: unknown = {}): QueryResults[QueryName] {
     const schema = queries[name as QueryName];
     if (!schema) throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
-    if (name === "project") return this.get("project", queries.project.parse(input).project_id);
+    if (name === "work_requests") {
+      const args = queries.work_requests.parse(input),
+        task = this.task(args.task_id),
+        all = pendingRequests(this, task);
+      const items = all.slice(args.offset, args.offset + args.limit);
+      return {
+        items,
+        total: all.length,
+        next_offset:
+          args.offset + items.length < all.length
+            ? args.offset + items.length
+            : null,
+      };
+    }
+    if (name === "work_dependencies") {
+      const args = queries.work_dependencies.parse(input),
+        task = this.task(args.task_id);
+      const items = dependencyItems(this, task, args.offset, args.limit),
+        total = dependencies(this, task).length;
+      return {
+        items,
+        total,
+        next_offset:
+          args.offset + items.length < total
+            ? args.offset + items.length
+            : null,
+      };
+    }
+    if (name === "work_next") {
+      const args = queries.work_next.parse(input);
+      return workGuide(
+        this,
+        args.run_id,
+        this.task(args.task_id),
+        args.max_chars,
+      );
+    }
+    if (name === "project")
+      return this.get("project", queries.project.parse(input).project_id);
     if (name === "decisions") {
       const args = queries.decisions.parse(input);
       this.get("project", args.project_id);
       const task = args.task_id
         ? this.sameProject(args.project_id, "task", args.task_id)
         : null;
-      const scopeIds = task
-        ? [task.id, ...this.ancestors(task).map((t) => t.id)]
-        : [];
-      const all = this.store
-        .list("decision", args.project_id)
-        .filter(
-          (d) =>
-            !task ||
-            !d.task_ids.length ||
-            d.task_ids.some((id) => scopeIds.includes(id)),
-        );
+      const all = task
+        ? relevantDecisions(this, task)
+        : this.store.list("decision", args.project_id);
       const items = all.slice(args.offset, args.offset + args.limit);
       return {
         items,
@@ -427,7 +546,31 @@ export class Service {
     if (name === "snapshot") {
       const args = queries.snapshot.parse(input);
       const project = this.get("project", args.project_id);
+      const pendingRequests = this.store
+        .list("message", project.id)
+        .filter(
+          (m) =>
+            ["request", "blocker"].includes(m.kind) &&
+            !m.resolved_at &&
+            !m.system,
+        );
+      const request_counts: Record<string, number> = {};
+      for (const message of pendingRequests)
+        request_counts[message.task_id || "project"] =
+          (request_counts[message.task_id || "project"] || 0) + 1;
       return {
+        attention: {
+          requests_total: pendingRequests.length,
+          request_counts,
+          recovery_task_ids: this.tasks(project.id)
+            .filter(
+              (t) =>
+                ACTIVE.has(t.status) &&
+                t.status !== "review" &&
+                needsRecovery(this, t),
+            )
+            .map((t) => t.id),
+        },
         project,
         tasks: this.tasks(project.id),
         agents: this.store.list("agent", project.id),
@@ -495,7 +638,303 @@ export class Service {
     if (name === "context") return this.context(queries.context.parse(input));
     throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
   }
-  project_create(args: CommandArgs<"project_create">): CommandResults["project_create"] {
+  assertGuidedReady(task: Task) {
+    if (!task.workflow && !task.execution) return;
+    ensure(
+      !needsRecovery(this, task),
+      "RECOVERY_REQUIRED",
+      "当前任务需要重新核对现场与契约，请读取 relay_work_next",
+    );
+    ensure(
+      !task.workflow?.uncertain_actions.length,
+      "UNCERTAIN_ACTIONS",
+      "先核实待定操作再提交",
+    );
+    ensure(
+      !task.execution ||
+        task.execution.steps.every((step) =>
+          task.workflow?.completed_steps.includes(step.id),
+        ),
+      "STEPS_INCOMPLETE",
+      "先完成有序执行步骤",
+    );
+    ensure(
+      !!task.execution || task.workflow?.ready_for_verification,
+      "NOT_READY_FOR_VERIFICATION",
+      "请明确记录实现已准备验证",
+    );
+  }
+  message_resolve(
+    args: CommandArgs<"message_resolve">,
+  ): CommandResults["message_resolve"] {
+    const message = this.get("message", args.message_id),
+      run = this.sameProject(message.project_id, "run", args.run_id);
+    ensure(
+      run.status === "active",
+      "RUN_INACTIVE",
+      "请使用有效执行会话处理请求",
+    );
+    const task = message.task_id ? this.task(message.task_id) : null;
+    ensure(
+      message.to_run_id === run.id ||
+        task?.owner_run_id === run.id ||
+        (!!task && this.ancestors(task).some((p) => p.owner_run_id === run.id)),
+      "NOT_RECIPIENT",
+      "仅收件人、当前任务负责人或上层协调者处理请求",
+    );
+    ensure(
+      ["request", "blocker"].includes(message.kind),
+      "NOT_REQUEST",
+      "此消息不是待处理请求",
+    );
+    const result = this.update("message", message, {
+      resolved_at: now(),
+      resolved_by: run.id,
+      resolution: args.note,
+    });
+    this.emit(message.project_id, "message.resolved", {
+      task_id: message.task_id,
+      run_id: run.id,
+      message_id: message.id,
+      summary: args.note,
+    });
+    return result;
+  }
+  work_start(args: CommandArgs<"work_start">): CommandResults["work_start"] {
+    const run = this.run(args.run_id);
+    ensure(run.status === "active", "RUN_INACTIVE", "请登记新的有效执行会话");
+    let task = args.task_id
+      ? this.sameProject(run.project_id, "task", args.task_id)
+      : this.tasks(run.project_id).find(
+          (t) => t.owner_run_id === run.id && ACTIVE.has(t.status),
+        );
+    if (!task && !args.task_id)
+      task = this.query("eligible", {
+        project_id: run.project_id,
+        run_id: run.id,
+      }).find((e) => e.eligible && e.task.mode === "execute")?.task;
+    if (task?.status === "pending")
+      task = this.task_claim({
+        task_id: task.id,
+        run_id: run.id,
+        expected_version: task.version,
+      });
+    return workGuide(this, run.id, task || null);
+  }
+  work_report(args: CommandArgs<"work_report">): CommandResults["work_report"] {
+    let task = this.task(args.handle.task_id);
+    const run = this.currentClaim(task, args.handle, true);
+    this.revision(task, args.handle.task_version);
+    ensure(
+      args.handle.context_version === recoverySignature(this, task),
+      "CONTEXT_CHANGED",
+      "契约或依赖已变化；请先 relay_work_next 读取当前指引",
+      {
+        next_action: {
+          tool: "relay_work_next",
+          arguments: { task_id: task.id, run_id: run.id },
+        },
+      },
+    );
+    ensure(
+      task.status !== "review",
+      "ALREADY_SUBMITTED",
+      "成果已提交，请等待独立验收",
+    );
+    const old = task.workflow || emptyWorkflow(task);
+    let workflow = { ...old };
+    if (args.kind === "recover") {
+      ensure(
+        args.observed,
+        "OBSERVATION_REQUIRED",
+        "先核对实际目录、分支、改动、进程和接收成果，再填写 observed",
+      );
+      const decisions = relevantDecisions(this, task);
+      const missing = decisions.filter(
+        (d) => !args.read_decision_ids?.includes(d.id),
+      );
+      ensure(
+        !missing.length,
+        "CONTRACTS_UNREAD",
+        "请完整读取相关契约并提供 read_decision_ids",
+        {
+          decision_ids: missing.map((d) => d.id),
+          query: {
+            tool: "relay_decisions",
+            arguments: {
+              project_id: task.project_id,
+              task_id: task.id,
+              offset: 0,
+            },
+          },
+        },
+      );
+      const receipts = args.dependency_receipts || [];
+      const unreceived = dependencies(this, task).filter(
+        (d) =>
+          d.status !== "done" ||
+          !receipts.some(
+            (r) => r.task_id === d.id && r.revision === artifactRevision(d),
+          ),
+      );
+      ensure(
+        !unreceived.length,
+        "DEPENDENCIES_NOT_RECEIVED",
+        "请先核实前置成果已进入当前工作区，再按当前 revision 报告 dependency_receipts",
+        {
+          task_ids: unreceived.map((d) => d.id),
+          query: {
+            tool: "relay_work_dependencies",
+            arguments: { task_id: task.id, offset: 0, limit: 20 },
+          },
+        },
+      );
+      if (task.status === "reconcile")
+        task = this.task_reconcile({
+          task_id: task.id,
+          run_id: run.id,
+          claim_epoch: task.claim_epoch,
+          observed: args.observed,
+          next_step: args.next_step || "按执行指引继续",
+        });
+      workflow = {
+        ...old,
+        recovered_epoch: task.claim_epoch,
+        recovered_signature: recoverySignature(this, task),
+        recovered_at: now(),
+        observed: args.observed,
+        plan_signature: requirementsSignature(this, task),
+        completed_steps:
+          old.plan_signature === requirementsSignature(this, task)
+            ? old.completed_steps
+            : [],
+        dependency_receipts: receipts,
+        ready_for_verification:
+          old.plan_signature === requirementsSignature(this, task) &&
+          old.ready_for_verification,
+      };
+    } else {
+      ensure(
+        args.kind === "blocked" || !needsRecovery(this, task),
+        "RECOVERY_REQUIRED",
+        "先使用 relay_work_next 读取并完成 recover 核验",
+        {
+          next_action: {
+            tool: "relay_work_next",
+            arguments: { task_id: task.id, run_id: run.id },
+          },
+        },
+      );
+      ensure(
+        task.status !== "blocked" ||
+          ["progress", "blocked"].includes(args.kind),
+        "BLOCKER_UNRESOLVED",
+        "请先通过 progress 报告阻塞解决依据",
+      );
+      ensure(
+        !old.uncertain_actions.length ||
+          ["progress", "blocked"].includes(args.kind),
+        "UNCERTAIN_ACTIONS",
+        "先核实结果待定操作，progress 中显式报告剩余 uncertain_actions",
+      );
+      if (args.kind === "step") {
+        const next = task.execution?.steps.find(
+          (step) => !old.completed_steps.includes(step.id),
+        );
+        ensure(
+          next && next.id === args.step_id,
+          "STEP_ORDER",
+          "只完成当前有序步骤；先读取 relay_work_next",
+          { step_id: next?.id },
+        );
+        workflow.completed_steps = [...old.completed_steps, next.id];
+        workflow.ready_for_verification =
+          workflow.completed_steps.length === task.execution?.steps.length;
+      }
+      if (args.kind === "verify" || args.kind === "submit") {
+        ensure(
+          !task.execution ||
+            task.execution.steps.every((step) =>
+              old.completed_steps.includes(step.id),
+            ),
+          "STEPS_INCOMPLETE",
+          "先完成当前有序步骤",
+        );
+        ensure(
+          !!task.execution || old.ready_for_verification,
+          "NOT_READY_FOR_VERIFICATION",
+          "完成实现后通过 progress 设置 ready_for_verification: true",
+        );
+        ensure(
+          this.tasks(task.project_id)
+            .filter((t) => t.parent_id === task.id)
+            .every((t) => t.status === "done"),
+          "CHILDREN_INCOMPLETE",
+          "先完成所有子任务验收再验证集成",
+        );
+      }
+      if (args.kind === "verify")
+        ensure(
+          args.verification?.length,
+          "VERIFICATION_REQUIRED",
+          "运行检查后报告 verification 的命令、实际结果与 passed；此工具不执行命令",
+        );
+      if (args.kind === "submit") {
+        // Do not replace a successful verification checkpoint with a summary-only checkpoint.
+        task = this.task_submit({
+          task_id: task.id,
+          run_id: run.id,
+          claim_epoch: task.claim_epoch,
+          summary: args.summary,
+        });
+        return workGuide(this, run.id, task);
+      }
+      if (args.ready_for_verification !== undefined)
+        workflow.ready_for_verification = args.ready_for_verification;
+    }
+    // Explicitly supplied arrays replace working memory so resolved uncertainties can be cleared.
+    for (const key of [
+      "facts",
+      "failed_attempts",
+      "uncertain_actions",
+    ] as const)
+      if (args[key] !== undefined) workflow[key] = args[key];
+    const blocker = args.kind === "blocked" ? args.summary : "";
+    task = this.task_checkpoint(
+      {
+        task_id: task.id,
+        run_id: run.id,
+        claim_epoch: task.claim_epoch,
+        summary: args.summary,
+        next_step:
+          args.next_step ||
+          task.execution?.steps.find(
+            (step) => !workflow.completed_steps.includes(step.id),
+          )?.title ||
+          "按 relay_work_next 继续",
+        artifacts: args.artifacts || [],
+        verification: args.kind === "verify" ? args.verification || [] : [],
+        blocker,
+      },
+      args.kind === "blocked",
+    );
+    task = this.update("task", task, {
+      workflow,
+      ...(args.kind === "verify"
+        ? { verification: args.verification || [] }
+        : {}),
+    });
+    this.emit(task.project_id, "work.reported", {
+      task_id: task.id,
+      run_id: run.id,
+      kind: args.kind,
+      summary: args.summary,
+    });
+    return workGuide(this, run.id, task);
+  }
+  project_create(
+    args: CommandArgs<"project_create">,
+  ): CommandResults["project_create"] {
     const project = {
       ...args,
       id: uid("prj"),
@@ -508,7 +947,9 @@ export class Service {
     this.emit(project.id, "project.created", { summary: project.name });
     return project;
   }
-  project_update(args: CommandArgs<"project_update">): CommandResults["project_update"] {
+  project_update(
+    args: CommandArgs<"project_update">,
+  ): CommandResults["project_update"] {
     const p = this.get("project", args.project_id);
     this.revision(p, args.expected_version);
     const { project_id, expected_version, ...fields } = args;
@@ -521,7 +962,9 @@ export class Service {
     });
     return result;
   }
-  agent_register(args: CommandArgs<"agent_register">): CommandResults["agent_register"] {
+  agent_register(
+    args: CommandArgs<"agent_register">,
+  ): CommandResults["agent_register"] {
     const project = this.get("project", args.project_id);
     let depth = 0,
       delegated = args.delegated_scopes?.map(scopePath) || ["."],
@@ -605,7 +1048,9 @@ export class Service {
     });
     return { agent, run };
   }
-  run_heartbeat(args: CommandArgs<"run_heartbeat">): CommandResults["run_heartbeat"] {
+  run_heartbeat(
+    args: CommandArgs<"run_heartbeat">,
+  ): CommandResults["run_heartbeat"] {
     const run = this.run(args.run_id);
     ensure(
       run.status !== "ended",
@@ -643,7 +1088,9 @@ export class Service {
       );
     return result;
   }
-  run_process_reconcile(args: CommandArgs<"run_process_reconcile">): CommandResults["run_process_reconcile"] {
+  run_process_reconcile(
+    args: CommandArgs<"run_process_reconcile">,
+  ): CommandResults["run_process_reconcile"] {
     const run = this.run(args.run_id);
     ensure(
       run.process?.status === "unknown",
@@ -667,7 +1114,9 @@ export class Service {
     });
     return result;
   }
-  run_dispatch(args: CommandArgs<"run_dispatch">): CommandResults["run_dispatch"] {
+  run_dispatch(
+    args: CommandArgs<"run_dispatch">,
+  ): CommandResults["run_dispatch"] {
     const run = this.run(args.run_id);
     ensure(
       ["codex", "claude", "pi"].includes(run.runtime) && !!run.workdir,
@@ -800,9 +1249,12 @@ export class Service {
     });
     return result;
   }
-  task_checkpoint(args: CommandArgs<"task_checkpoint">): CommandResults["task_checkpoint"] {
+  task_checkpoint(
+    args: CommandArgs<"task_checkpoint">,
+    allowReconcile = false,
+  ): CommandResults["task_checkpoint"] {
     const task = this.task(args.task_id),
-      run = this.currentClaim(task, args);
+      run = this.currentClaim(task, args, allowReconcile);
     ensure(
       task.status !== "review",
       "ALREADY_SUBMITTED",
@@ -828,7 +1280,15 @@ export class Service {
       checkpoint,
       artifacts: merge(task.artifacts, args.artifacts, "path"),
       verification: merge(task.verification, args.verification, "command"),
-      status: args.blocker ? "blocked" : "doing",
+      ...(args.verification.length
+        ? { evidence: observeWorkspace(run.workdir, task.scopes) }
+        : {}),
+      status:
+        task.status === "reconcile" && allowReconcile
+          ? "reconcile"
+          : args.blocker
+            ? "blocked"
+            : "doing",
     });
     this.update("run", run, { last_progress_at: now(), last_seen_at: now() });
     this.emit(task.project_id, "task.checkpoint", {
@@ -859,6 +1319,7 @@ export class Service {
   }
   task_submit(args: CommandArgs<"task_submit">): CommandResults["task_submit"] {
     const task = this.task(args.task_id);
+    this.assertGuidedReady(task);
     this.currentClaim(task, args);
     ensure(
       ["doing", "blocked"].includes(task.status),
@@ -877,6 +1338,11 @@ export class Service {
         task.verification.every((v) => v.passed),
       "EVIDENCE_REQUIRED",
       "交付需要成果位置和通过的验证记录",
+    );
+    ensure(
+      !evidenceStale(this, task),
+      "EVIDENCE_STALE",
+      "验证后代码已变化或现场未能完整观察，请重新验证并记录结果",
     );
     const children = this.tasks(task.project_id).filter(
       (t) => t.parent_id === task.id,
@@ -929,6 +1395,12 @@ export class Service {
       );
     }
     if (args.accepted) {
+      this.assertGuidedReady(task);
+      ensure(
+        !evidenceStale(this, task),
+        "EVIDENCE_STALE",
+        "评审时文件版本已变化，请退回后重新验证",
+      );
       const process = this.run(task.owner_run_id).process;
       ensure(
         process?.task_id !== task.id || process.status !== "running",
@@ -962,7 +1434,7 @@ export class Service {
       const targets = new Set<string>(
         this.tasks(task.project_id)
           .filter((t) => t.depends_on.includes(task.id) && t.owner_run_id)
-          .flatMap((t) => t.owner_run_id ? [t.owner_run_id] : []),
+          .flatMap((t) => (t.owner_run_id ? [t.owner_run_id] : [])),
       );
       const parent = task.parent_id ? this.task(task.parent_id) : null;
       if (parent?.owner_run_id) targets.add(parent.owner_run_id);
@@ -1036,7 +1508,9 @@ export class Service {
     });
     return { parent, children };
   }
-  proposal_create(args: CommandArgs<"proposal_create">): CommandResults["proposal_create"] {
+  proposal_create(
+    args: CommandArgs<"proposal_create">,
+  ): CommandResults["proposal_create"] {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     this.sameProject(task.project_id, "run", args.author_run_id);
@@ -1070,7 +1544,9 @@ export class Service {
       );
     return proposal;
   }
-  proposal_resolve(args: CommandArgs<"proposal_resolve">): CommandResults["proposal_resolve"] {
+  proposal_resolve(
+    args: CommandArgs<"proposal_resolve">,
+  ): CommandResults["proposal_resolve"] {
     const proposal = this.get("proposal", args.proposal_id);
     ensure(
       proposal.type === "split" && proposal.status === "pending",
@@ -1099,7 +1575,9 @@ export class Service {
     });
     return { proposal: result, split };
   }
-  scope_request(args: CommandArgs<"scope_request">): CommandResults["scope_request"] {
+  scope_request(
+    args: CommandArgs<"scope_request">,
+  ): CommandResults["scope_request"] {
     const task = this.task(args.task_id);
     this.currentClaim(task, args);
     const proposal: ScopeProposal = {
@@ -1121,7 +1599,9 @@ export class Service {
     });
     return proposal;
   }
-  scope_resolve(args: CommandArgs<"scope_resolve">): CommandResults["scope_resolve"] {
+  scope_resolve(
+    args: CommandArgs<"scope_resolve">,
+  ): CommandResults["scope_resolve"] {
     const proposal = this.get("proposal", args.proposal_id),
       task = this.task(proposal.task_id);
     ensure(
@@ -1185,7 +1665,9 @@ export class Service {
     });
     return { proposal: result, task: updated };
   }
-  task_handoff(args: CommandArgs<"task_handoff">): CommandResults["task_handoff"] {
+  task_handoff(
+    args: CommandArgs<"task_handoff">,
+  ): CommandResults["task_handoff"] {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     this.actor(task, args.from_run_id);
@@ -1332,7 +1814,9 @@ export class Service {
     });
     return result;
   }
-  task_reconcile(args: CommandArgs<"task_reconcile">): CommandResults["task_reconcile"] {
+  task_reconcile(
+    args: CommandArgs<"task_reconcile">,
+  ): CommandResults["task_reconcile"] {
     const task = this.task(args.task_id);
     this.currentClaim(task, args, true);
     ensure(
@@ -1369,7 +1853,9 @@ export class Service {
     });
     return result;
   }
-  task_release(args: CommandArgs<"task_release">): CommandResults["task_release"] {
+  task_release(
+    args: CommandArgs<"task_release">,
+  ): CommandResults["task_release"] {
     const task = this.task(args.task_id),
       run = this.currentClaim(task, args, true);
     ensure(
@@ -1395,7 +1881,12 @@ export class Service {
     });
     return result;
   }
-  systemMessage(project: string, to: string, task: string | undefined, body: string) {
+  systemMessage(
+    project: string,
+    to: string,
+    task: string | undefined,
+    body: string,
+  ) {
     return this.message_send({
       project_id: project,
       to_run_id: to,
@@ -1405,7 +1896,9 @@ export class Service {
       system: true,
     });
   }
-  message_send(args: CommandArgs<"message_send"> & { system?: boolean }): CommandResults["message_send"] {
+  message_send(
+    args: CommandArgs<"message_send"> & { system?: boolean },
+  ): CommandResults["message_send"] {
     this.get("project", args.project_id);
     if (args.from_run_id)
       this.sameProject(args.project_id, "run", args.from_run_id);
@@ -1452,7 +1945,9 @@ export class Service {
       acknowledged_at: message.acknowledged_at || now(),
     });
   }
-  decision_record(args: CommandArgs<"decision_record">): CommandResults["decision_record"] {
+  decision_record(
+    args: CommandArgs<"decision_record">,
+  ): CommandResults["decision_record"] {
     this.get("project", args.project_id);
     if (args.actor_run_id)
       this.sameProject(args.project_id, "run", args.actor_run_id);
@@ -1473,14 +1968,7 @@ export class Service {
     if (args.run_id) this.sameProject(project.id, "run", args.run_id);
     const parents = this.ancestors(task),
       children = this.tasks(project.id).filter((t) => t.parent_id === task.id);
-    const allDecisions = this.store
-      .list("decision", project.id)
-      .filter(
-        (d) =>
-          !d.task_ids.length ||
-          d.task_ids.includes(task.id) ||
-          parents.some((p) => d.task_ids.includes(p.id)),
-      );
+    const allDecisions = relevantDecisions(this, task);
     const decisions = allDecisions.slice(-8),
       omissions = [];
     const bounded = (value: unknown, count: number) => {
@@ -1501,6 +1989,8 @@ export class Service {
       `## 目标\n${bounded(project.objective, 1800)}\n任务：${bounded(task.description, 1800)}\n验收标准：${bounded(task.acceptance, 1800)}`,
       `## 用户约束\n${bounded(project.constraints, 2400) || "未另行记录。遵循当前用户的有效指令。"}\n任务交接不扩大行动权限。`,
       `## 工作范围\n项目目录：${project.root_path || "未登记"}\n写入范围：${task.scopes.join(", ") || "只读"}\n独占资源：${task.resources.join(", ") || "无"}\n执行目录：${task.owner_run_id ? this.run(task.owner_run_id).workdir || "未登记" : "未登记"}`,
+      `## 执行说明\n${task.execution ? `输入：${task.execution.inputs.join("; ")}\n产出：${task.execution.outputs.join("; ")}\n${task.execution.steps.map((step) => `- ${step.id} ${step.title}: ${bounded(step.instructions, 500)}；完成：${bounded(step.done_when, 300)}；失败：${bounded(step.on_failure, 300)}`).join("\n")}\n停止并求助：${task.execution.stop_when.join("; ")}` : "未配置有序步骤；按验收标准和当前下一步执行，完成实现后报告准备验证。"}`,
+      `## 已知事实、失败尝试与待核实操作\n${bounded(JSON.stringify({ facts: task.workflow?.facts || [], failed_attempts: task.workflow?.failed_attempts || [], uncertain_actions: task.workflow?.uncertain_actions || [], completed_steps: task.workflow?.completed_steps || [] }), 2000)}`,
       `## 当前事实与下一步\n${task.checkpoint ? `${bounded(task.checkpoint.summary, 2000)}\n检查点：${task.checkpoint.at}\n阻塞：${bounded(task.checkpoint.blocker, 1000) || "无"}\n下一步：${bounded(task.checkpoint.next_step, 1600) || "按验收标准继续"}` : "尚无检查点。先核对现场再计划。"}`,
       `## 交接核验\n${task.handoff ? `${bounded(task.handoff.summary, 1500)}\n旧执行停止确认：${task.handoff.confirmed_stop}\n后代任务处理：${task.handoff.descendants}` : "无历史交接。"}\n先检查实际文件、分支、未提交改动、运行进程和成果。已记录的验证只证明对应时间点。`,
       `## 成果\n${
@@ -1526,10 +2016,41 @@ export class Service {
           })
           .join("; ") || "无"
       }`,
-      `## 相关决定\n${decisions.map((d) => `- ${d.title}: ${bounded(d.body, 900)}`).join("\n") || "尚无记录"}`,
+      `## 相关决定\n${decisions.map((d) => `- ${d.id} ${d.title}: ${bounded(d.body, 900)}`).join("\n") || "尚无记录"}`,
       "## 协作规则\n先登记子执行者再派发；领取和更新时使用服务返回的版本。子执行者必须报告检查点、阻塞和交付。范围扩展先申请；共享目录交接先停止旧写入；独立 worktree 的成果仍需集成验证。会话重启先核验，别重复执行结果未知的外部操作。按需查询讨论和历史，避免加载全项目日志。",
     ];
-    let body = parts.join("\n\n");
+    // Keep constraints and recovery instructions ahead of potentially lengthy plans/history.
+    const priority = [
+      parts[0],
+      parts[1],
+      parts[3],
+      parts[4],
+      parts[7],
+      parts[8],
+      parts[2],
+      parts[5],
+      parts[6],
+      ...parts.slice(9),
+    ];
+    const requests = pendingRequests(this, task);
+    if (requests.length) {
+      if (requests.length > 5)
+        omissions.push("待处理请求有省略，使用 relay_work_requests 分页读取");
+      priority.splice(
+        5,
+        0,
+        `## 继承的待处理请求（已读不等于已处理）\n${requests
+          .slice(0, 5)
+          .map(
+            (m) =>
+              `- ${m.id} 原收件人 ${m.to_run_id || "项目"}: ${bounded(m.body, 500)}`,
+          )
+          .join(
+            "\n",
+          )}\n使用 relay_work_requests 读取全文；处理后 relay_message_resolve 记录结论。`,
+      );
+    }
+    let body = priority.join("\n\n");
     const total = body.length;
     // Bound output without silently suggesting the full record has been loaded.
     if (body.length > args.max_chars) omissions.push("接手包达到长度预算");

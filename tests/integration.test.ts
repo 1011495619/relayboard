@@ -414,3 +414,102 @@ test("skill catalog exposes bundled roles and exact sources behind authenticatio
     404,
   );
 });
+
+test("real HTTP MCP guides a fresh executor through recovery, steps, verification and review with fenced handles", async (t) => {
+  const f = await fixture(t);
+  const client = new Client({ name: "fresh-guided-executor", version: "1" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(f.url + "/mcp")),
+  );
+  t.after(() => client.close());
+  const tools = await client.listTools();
+  for (const name of [
+    "relay_work_start",
+    "relay_work_next",
+    "relay_work_report",
+  ])
+    assert.ok(tools.tools.some((tool) => tool.name === name));
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const result = (await client.callTool({
+      name: "relay_" + name,
+      arguments: args,
+    })) as CallToolResult;
+    assert.ok(!result.isError, mcpText(result));
+    return result.structuredContent!.result;
+  };
+  const project = await f.command("project_create", {
+    name: "MCP恢复",
+    objective: "只靠服务指引完成",
+  });
+  const { run } = await f.command("agent_register", {
+    project_id: project.id,
+    name: "新上下文执行者",
+    runtime: "codex",
+    workdir: f.dir,
+  });
+  const task = await f.command("task_create", {
+    project_id: project.id,
+    title: "步骤任务",
+    acceptance: "产出与验证",
+    scopes: ["result.txt"],
+    execution: {
+      steps: [
+        {
+          id: "write",
+          title: "写入",
+          instructions: "写result.txt",
+          done_when: "内容正确",
+          on_failure: "报告阻塞",
+        },
+      ],
+    },
+  });
+  let guide = (await call("work_start", {
+    run_id: run.id,
+    task_id: task.id,
+  })) as import("../server/types.js").WorkGuide;
+  assert.equal(guide.stage, "recover");
+  guide = (await call("work_report", {
+    handle: guide.handle,
+    kind: "recover",
+    summary: "已核对现场",
+    observed: "目录/分支/改动/进程已核对",
+    read_decision_ids: [],
+    dependency_receipts: [],
+  })) as typeof guide;
+  assert.equal(guide.stage, "execute");
+  const before = guide.handle;
+  guide = (await call("work_report", {
+    handle: guide.handle,
+    kind: "step",
+    step_id: "write",
+    summary: "产出已保存",
+  })) as typeof guide;
+  const stale = (await client.callTool({
+    name: "relay_work_report",
+    arguments: { handle: before, kind: "progress", summary: "过期写入" },
+  })) as CallToolResult;
+  assert.ok(stale.isError);
+  assert.match(mcpText(stale), /STALE_VERSION/);
+  assert.equal(guide.stage, "verify");
+  guide = (await call("work_report", {
+    handle: guide.handle,
+    kind: "verify",
+    summary: "实际验证通过",
+    artifacts: [{ path: "result.txt" }],
+    verification: [
+      { command: "fixture check", passed: true, result: "observed pass" },
+    ],
+  })) as typeof guide;
+  assert.equal(guide.stage, "submit");
+  guide = (await call("work_report", {
+    handle: guide.handle,
+    kind: "submit",
+    summary: "请独立验收",
+  })) as typeof guide;
+  assert.equal(guide.stage, "review");
+  assert.equal(
+    f.service.task(task.id).evidence?.verification_source,
+    "agent_reported",
+  );
+});

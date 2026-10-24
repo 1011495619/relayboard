@@ -6,12 +6,18 @@ import { commands, queries } from "./schemas.js";
 import { version } from "./config.js";
 
 export const SERVER_INSTRUCTIONS =
-  "Relayboard is the shared source of task state. Register EVERY execution session and native subagent before dispatch, with parent_run_id. Query eligible work, then atomically claim using expected_version. Preserve returned claim_epoch for checkpoints. Do not edit outside assigned ranges. Save checkpoints before compaction and delegation. Request approval for scope expansion. Read your inbox and record agreed decisions. Handoffs require stopping old writers and reconciling actual files. A heartbeat is not progress. Scope checks are cooperative; use separate worktrees for parallel code changes. Use context packets, not full logs.";
+  "Preferred workflow: register your own Run, work_start, read and follow work_next, report actual recovery/ordered steps/blockers/verification with work_report using its exact handle. Recovery reads contracts and received dependencies before writing; changes invalidate old handles. Save factual progress BEFORE compaction when the client supports it; hooks only export saved facts. Relayboard is the shared source of task state. Register EVERY execution session and native subagent before dispatch, with parent_run_id. Query eligible work, then atomically claim using expected_version. Preserve returned claim_epoch for checkpoints. Do not edit outside assigned ranges. Save checkpoints before compaction and delegation. Request approval for scope expansion. Read your inbox and record agreed decisions. Handoffs require stopping old writers and reconciling actual files. A heartbeat is not progress. Scope checks are cooperative; use separate worktrees for parallel code changes. Use context packets, not full logs.";
 const queryDescriptions: Record<string, string> = {
+  work_requests:
+    "Read unresolved requests and blockers for a task and its ancestors, including prior owners at handoff. Follow next_offset; ack is read receipt only, message_resolve records handling.",
+  work_dependencies:
+    "Read paginated dependency artifact revisions and receipt status. Follow next_offset until null before recovery; readiness never substitutes for actual integration into this worktree.",
+  work_next:
+    "Preferred read-only entry: return one next action, recovery checklist, ordered step, blockers and bounded context for an execution session. Reading never takes ownership. Use the returned handle unchanged for work_report.",
   project:
     "Read the complete project objective, user constraints and execution budget without loading the full task history.",
   decisions:
-    "Read a bounded page of confirmed decisions relevant to a task and its ancestors, or all project decisions. Follow next_offset when present.",
+    "Read a bounded page of confirmed decisions relevant to a task, ancestors, dependencies and coordinator descendants, or all project decisions. Follow next_offset when present.",
   projects: "List persistent project workspaces.",
   snapshot:
     "Read the project task tree, execution-session ancestry, recent events, proposals and decisions. Use task/context queries for focused reads.",

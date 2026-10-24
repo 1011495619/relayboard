@@ -1,6 +1,6 @@
 # Relayboard development
 
-Read the assigned Relayboard task and context before editing. Register each actual execution session and every native descendant with its own Run. Parallel writers use separate Git worktrees and explicit scopes. Save real checkpoints and directed reports through the MCP service.
+Read the assigned Relayboard task and context before editing. Prefer work_start → work_next → work_report, copying the current handle unchanged. Recover actual files, full contracts and received dependency revisions first; execute the current ordered step, save failed attempts and unknown outcomes, and report blockers without inventing recovery. Read all omission/pagination references. A read acknowledgement is not request resolution. Register each actual execution session and every native descendant with its own Run. Parallel writers use separate Git worktrees and explicit scopes. Save real checkpoints and directed reports through the MCP service.
 
 The source is strict TypeScript. Run `npm run check` before delivery; published packages contain compiled JavaScript in `lib/` and web assets in `dist/`. Preserve stored data and existing coordination invariants.
 

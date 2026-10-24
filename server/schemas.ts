@@ -17,8 +17,45 @@ const artifact = z
 const verification = z
   .object({ command: short, result: text.min(1), passed: z.boolean() })
   .strict();
+export const executionStep = z
+  .object({
+    id: id,
+    title: short,
+    instructions: text.min(1),
+    done_when: text.min(1),
+    on_failure: text.min(1),
+  })
+  .strict();
+export const executionPlan = z
+  .object({
+    inputs: paths.default([]),
+    outputs: paths.default([]),
+    steps: z
+      .array(executionStep)
+      .min(1)
+      .max(40)
+      .refine(
+        (steps) => new Set(steps.map((step) => step.id)).size === steps.length,
+        "步骤 ID 须唯一",
+      ),
+    stop_when: z.array(short).max(30).default([]),
+  })
+  .strict();
+const workHandle = z
+  .object({
+    task_id: id,
+    run_id: id,
+    claim_epoch: version,
+    task_version: version,
+    context_version: z.string().min(1).max(100),
+  })
+  .strict();
+const dependencyReceipt = z
+  .object({ task_id: id, revision: text.min(1), note: text.min(1) })
+  .strict();
 export const taskFields = {
   title: short,
+  execution: executionPlan.nullable().optional(),
   description: text.default(""),
   acceptance: text.min(1),
   parent_id: id.nullable().optional(),
@@ -32,11 +69,49 @@ export const taskFields = {
 const childTask = z.object(taskFields).omit({ parent_id: true }).strict();
 const claimFields = {
   task_id: id,
-  run_id: id.describe("Your execution session ID: agent_register returns {agent, run}; use run.id, not agent.id."),
-  claim_epoch: version.describe("Current task ownership epoch returned by claim, split or handoff; distinct from task.version."),
+  run_id: id.describe(
+    "Your execution session ID: agent_register returns {agent, run}; use run.id, not agent.id.",
+  ),
+  claim_epoch: version.describe(
+    "Current task ownership epoch returned by claim, split or handoff; distinct from task.version.",
+  ),
 };
 
 export const commands = {
+  work_start: {
+    description:
+      "Preferred entry: resume your assigned task or atomically claim eligible work. Returns a recovery checklist and exactly one next action. Register your own Run first. Never takes over another owner.",
+    schema: z.object({ run_id: id, task_id: id.optional() }).strict(),
+  },
+  work_report: {
+    description:
+      "Preferred progress entry: use the exact current guide handle. Recover actual files and acknowledge contracts first; then report progress, the next ordered step, blockers, verification or submission. Does not execute tests or accept work on your behalf.",
+    schema: z
+      .object({
+        handle: workHandle,
+        kind: z.enum([
+          "recover",
+          "progress",
+          "step",
+          "blocked",
+          "verify",
+          "submit",
+        ]),
+        summary: text.min(1),
+        observed: text.min(1).optional(),
+        step_id: id.optional(),
+        next_step: text.optional(),
+        artifacts: z.array(artifact).max(40).optional(),
+        verification: z.array(verification).max(20).optional(),
+        facts: z.array(text.min(1)).max(30).optional(),
+        failed_attempts: z.array(text.min(1)).max(30).optional(),
+        uncertain_actions: z.array(text.min(1)).max(30).optional(),
+        read_decision_ids: ids.optional(),
+        dependency_receipts: z.array(dependencyReceipt).max(100).optional(),
+        ready_for_verification: z.boolean().optional(),
+      })
+      .strict(),
+  },
   project_create: {
     description:
       "Create a persistent project workspace with objective, constraints and a shared descendant concurrency budget.",
@@ -149,6 +224,7 @@ export const commands = {
         expected_version: version,
         actor_run_id: id.optional(),
         title: short.optional(),
+        execution: executionPlan.nullable().optional(),
         description: text.optional(),
         acceptance: text.min(1).optional(),
         depends_on: ids.optional(),
@@ -309,6 +385,13 @@ export const commands = {
       })
       .strict(),
   },
+  message_resolve: {
+    description:
+      "Record how a request or blocker was handled. Reading/acknowledging a message is not resolving it; the current task owner may resolve requests inherited at handoff.",
+    schema: z
+      .object({ message_id: id, run_id: id, note: text.min(1) })
+      .strict(),
+  },
   message_ack: {
     description:
       "Acknowledge receipt of a directed message without copying the whole discussion into context.",
@@ -330,6 +413,27 @@ export const commands = {
 };
 
 export const queries = {
+  work_requests: z
+    .object({
+      task_id: id,
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(20).default(20),
+    })
+    .strict(),
+  work_dependencies: z
+    .object({
+      task_id: id,
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(20).default(20),
+    })
+    .strict(),
+  work_next: z
+    .object({
+      run_id: id,
+      task_id: id,
+      max_chars: z.number().int().min(1500).max(24000).default(10000),
+    })
+    .strict(),
   projects: z.object({}).strict(),
   project: z.object({ project_id: id }).strict(),
   decisions: z
@@ -368,12 +472,23 @@ export const queries = {
 
 /** Input types preserve optional defaulted fields; Args are validated/defaulted outputs. */
 export type CommandName = keyof typeof commands;
-export type CommandArgs<K extends CommandName> = z.output<(typeof commands)[K]["schema"]>;
-export type CommandInput<K extends CommandName> = z.input<(typeof commands)[K]["schema"]>;
+export type CommandArgs<K extends CommandName> = z.output<
+  (typeof commands)[K]["schema"]
+>;
+export type CommandInput<K extends CommandName> = z.input<
+  (typeof commands)[K]["schema"]
+>;
 export type QueryName = keyof typeof queries;
 export type QueryArgs<K extends QueryName> = z.output<(typeof queries)[K]>;
 export type QueryInput<K extends QueryName> = z.input<(typeof queries)[K]>;
-export type TaskFields = z.output<typeof childTask> & { parent_id?: string | null };
+export type TaskFields = z.output<typeof childTask> & {
+  parent_id?: string | null;
+};
 export type Artifact = z.output<typeof artifact>;
 export type Verification = z.output<typeof verification>;
 export type Runtime = z.output<typeof runtime>;
+
+export type ExecutionStep = z.output<typeof executionStep>;
+export type ExecutionPlan = z.output<typeof executionPlan>;
+export type WorkHandle = z.output<typeof workHandle>;
+export type DependencyReceipt = z.output<typeof dependencyReceipt>;
