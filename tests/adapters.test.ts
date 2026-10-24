@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import piExtension, {
@@ -40,7 +40,7 @@ test("pi lifecycle adapter registers MCP, injects bounded context, reinjects aft
       string,
       (event: unknown, ctx: ExtensionContext) => Promise<Injection | void>
     >(),
-    entries = [],
+    entries: { type: string; value: Record<string, unknown> }[] = [],
     servers: {
       name: string;
       opts: Parameters<NonNullable<PiExtensionApi["registerMcpServer"]>>[1];
@@ -49,6 +49,11 @@ test("pi lifecycle adapter registers MCP, injects bounded context, reinjects aft
     const body = JSON.parse(String(opts?.body));
     url = String(url);
     calls.push({ url, body, headers: new Headers(opts?.headers) });
+    if (body.query === "work_next")
+      return Response.json(
+        { error: { code: "UNKNOWN_QUERY", message: "旧服务" } },
+        { status: 400 },
+      );
     const result = url.endsWith("/api/export")
       ? { path: "/fixture/HANDOFF.md" }
       : body.query === "context"
@@ -81,6 +86,12 @@ test("pi lifecycle adapter registers MCP, injects bounded context, reinjects aft
   );
   await handlers.get("session_before_compact")!({}, ctx);
   assert.equal(entries.length, 1);
+  assert.equal(entries[0].value.captures_unsaved_progress, false);
+  assert.equal(
+    calls.filter((c) => c.body.query === "work_next").length,
+    1,
+    "unsupported guided query is not retried each turn",
+  );
   await handlers.get("session_compact")!({}, ctx);
   assert.ok(
     (await handlers.get("before_agent_start")!({}, ctx))!.message,
@@ -279,5 +290,196 @@ test("handoff packets explicitly flag internal omissions and complete constraint
   assert.throws(
     () => s.execute("project_create", { name: "   ", objective: "work" }),
     (e: unknown) => e instanceof Error && e.name === "ZodError",
+  );
+});
+
+test("pi guided brief is bounded and refreshes contract bodies and inbox changes without a task version change", async (t) => {
+  const originalFetch = globalThis.fetch,
+    env = { ...process.env };
+  Object.assign(process.env, {
+    RELAYBOARD_URL: "http://127.0.0.1:9999",
+    RELAYBOARD_RUN_ID: "run_fixture",
+    RELAYBOARD_TASK_ID: "task_fixture",
+  });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    for (const key of [
+      "RELAYBOARD_URL",
+      "RELAYBOARD_RUN_ID",
+      "RELAYBOARD_TASK_ID",
+    ]) {
+      if (env[key] === undefined) delete process.env[key];
+      else process.env[key] = env[key];
+    }
+  });
+  const handlers = new Map<
+    string,
+    (event: unknown, ctx: ExtensionContext) => Promise<Injection | void>
+  >();
+  let contractBody = "API v1",
+    messageBody = "Check interface",
+    failed = false;
+  const queries: string[] = [],
+    warnings: string[] = [];
+  globalThis.fetch = async (_url, opts) => {
+    const body = JSON.parse(String(opts?.body));
+    queries.push(body.query);
+    if (body.query === "work_next") {
+      if (failed)
+        return Response.json(
+          { error: { code: "STALE_CLAIM", message: "Ownership changed" } },
+          { status: 409 },
+        );
+      return Response.json({
+        result: {
+          stage: "recover",
+          headline: "Inspect actual workspace",
+          handle: {
+            task_id: "task_fixture",
+            run_id: "run_fixture",
+            claim_epoch: 2,
+            task_version: 5,
+          },
+          next_action: {
+            tool: "relay_work_report",
+            reason: "Recover",
+            arguments: { kind: "recover", observed: "REPLACE WITH FACTS" },
+          },
+          context: {
+            version: 5,
+            markdown: "Constraints first. " + "x".repeat(20000),
+            truncated: true,
+            omissions: ["older history"],
+          },
+          checklist: ["Check cwd and branch"],
+          current_step: {
+            id: "a",
+            title: "Implement",
+            instructions: "Follow contract",
+            done_when: "Test passes",
+            on_failure: "Report blocker",
+          },
+          completed_steps: [],
+          warnings: [],
+          decisions: [
+            { id: "decision_fixture", title: "API", body: contractBody },
+          ],
+          dependencies: [],
+        },
+      });
+    }
+    return Response.json({
+      result:
+        body.query === "inbox"
+          ? [{ id: "message_fixture", body: messageBody }]
+          : {},
+    });
+  };
+  piExtension({ on: (name, fn) => handlers.set(name, fn) });
+  const ctx = { ui: { notify: (message: string) => warnings.push(message) } };
+  const inject = () => handlers.get("before_agent_start")!({}, ctx);
+  const first = await inject();
+  assert.ok(first && first.message.content.length <= 12000);
+  assert.ok(first.message.content.includes("claim_epoch"));
+  assert.ok(first.message.content.includes("relay_work_report"));
+  assert.ok(first.message.content.includes("contains omissions"));
+  assert.ok(
+    !queries.includes("context"),
+    "guided context is not fetched twice",
+  );
+  assert.equal(await inject(), undefined);
+  contractBody = "API v2";
+  assert.ok(
+    await inject(),
+    "same decision ID/version but changed contract body triggers refresh",
+  );
+  messageBody = "New request on the same message";
+  assert.ok(
+    await inject(),
+    "same message ID with changed body triggers refresh",
+  );
+  failed = true;
+  assert.equal(await inject(), undefined);
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes("Ownership changed"));
+  assert.ok(
+    !queries.includes("context"),
+    "claim errors do not silently fall back to obsolete context",
+  );
+  await handlers.get("session_shutdown")!({}, ctx);
+});
+
+test("managed launch gives a fresh session guided recovery instructions without reporting work on its behalf", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "relayboard-prompt-")),
+    store = new Store(),
+    s = new Service(store);
+  t.after(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const project = s.execute("project_create", {
+    name: "Prompt",
+    objective: "resume correctly",
+    root_path: dir,
+  });
+  const { run } = s.execute("agent_register", {
+    project_id: project.id,
+    name: "Fresh",
+    runtime: "codex",
+    workdir: dir,
+  });
+  const task = s.execute("task_create", {
+    project_id: project.id,
+    title: "Resume",
+    acceptance: "inspect before editing",
+    scopes: ["src"],
+  });
+  s.execute("task_claim", {
+    task_id: task.id,
+    run_id: run.id,
+    expected_version: task.version,
+  });
+  const promptFile = join(dir, "received-prompt.txt");
+  const runner = new Runner(s, {
+    dataDir: dir,
+    baseUrl: "http://127.0.0.1:9999",
+    profiles: {
+      codex: {
+        command: process.execPath,
+        args: [
+          "-e",
+          "let x='';process.stdin.on('data',c=>x+=c);process.stdin.on('end',()=>require('fs').writeFileSync(process.env.RELAYBOARD_PROMPT_FIXTURE,x));",
+        ],
+        stdin: true,
+      },
+    },
+  });
+  const oldFixture = process.env.RELAYBOARD_PROMPT_FIXTURE;
+  process.env.RELAYBOARD_PROMPT_FIXTURE = promptFile;
+  t.after(() => {
+    if (oldFixture === undefined) delete process.env.RELAYBOARD_PROMPT_FIXTURE;
+    else process.env.RELAYBOARD_PROMPT_FIXTURE = oldFixture;
+  });
+  runner.start({ run_id: run.id, task_id: task.id });
+  for (let i = 0; i < 100 && (runner.live.size || !existsSync(promptFile)); i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  t.after(() => {
+    if (runner.live.size) runner.stop(run.id);
+  });
+  const prompt = readFileSync(promptFile, "utf8");
+  for (const text of [
+    "call work_start",
+    "call work_next",
+    "CURRENT returned handle",
+    "before editing",
+    "only records already saved",
+    "UNKNOWN_QUERY",
+    "own Run",
+  ])
+    assert.ok(prompt.includes(text), text);
+  assert.equal(
+    s.task(task.id).checkpoint,
+    null,
+    "launch does not invent a recover report or progress",
   );
 });

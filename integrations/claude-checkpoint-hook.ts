@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-/** Claude PreCompact/Stop hook: exports already persisted task facts. It never invents a task summary. */
+/** Claude PreCompact/Stop hook exports persisted facts only.
+ * The active agent must work_report actual progress before the hook runs.
+ * This process has no model turn, transcript summary or unsaved-progress capture.
+ */
 import { readFileSync } from "node:fs";
 import { errorInfo } from "../bin/errors.js";
 import { request } from "../bin/client.js";
