@@ -140,6 +140,7 @@ import type {
   QueryResults,
 } from "./types";
 import { AttentionView } from "./components/attention-view";
+import { RequestResolution } from "./components/request-resolution";
 import { ExecutionGuide } from "./components/execution-guide";
 import { ExecutionEditor } from "./components/execution-editor";
 import type { ExecutionPlan } from "../../server/types.js";
@@ -985,6 +986,10 @@ function App() {
               {view === "home" && (
                 <AttentionView
                   data={data}
+                  currentRun={currentRun}
+                  resolveRequest={(message) =>
+                    setModal({ kind: "resolveMessage", message })
+                  }
                   openTask={openTask}
                   openBoard={() => setView("board")}
                   openDiscussions={() => setView("discussions")}
@@ -1957,6 +1962,14 @@ function DiscussionView({
                       }
                     </span>
                     <p>{m.body}</p>
+                    <RequestResolution
+                      message={m}
+                      currentRun={data.runs.find((run) => run.id === runId)}
+                      tasks={data.tasks}
+                      onResolve={(message) =>
+                        setModal({ kind: "resolveMessage", message })
+                      }
+                    />
                     <div className="message-bottom">
                       {t && (
                         <button
@@ -2706,6 +2719,18 @@ function TaskDrawer({
           ))}
           <ExecutionGuide
             task={t}
+            currentRun={currentRun}
+            tasks={data.tasks}
+            requestRevision={
+              JSON.stringify(data.attention?.request_counts ?? {}) +
+              data.messages
+                .filter((message) => !message.system)
+                .map((message) => `${message.id}:${message.version}`)
+                .join(",")
+            }
+            onResolveRequest={(message) =>
+              setModal({ kind: "resolveMessage", message })
+            }
             loadGuide={loadWorkGuide}
             runNames={Object.fromEntries(
               data.runs.map((run) => [run.id, run.name]),
@@ -2876,6 +2901,14 @@ function TaskDrawer({
                 </strong>
                 <small>{time(m.created_at)}</small>
                 <p>{m.body}</p>
+                <RequestResolution
+                  message={m}
+                  currentRun={currentRun}
+                  tasks={data.tasks}
+                  onResolve={(message) =>
+                    setModal({ kind: "resolveMessage", message })
+                  }
+                />
               </div>
             ))}
             {!messages.length && (
@@ -2956,6 +2989,7 @@ function Modal({
     scope: "申请扩大修改范围",
     release: "释放任务",
     message: "发送任务消息",
+    resolveMessage: "标记请求已处理",
     decision: "记录项目决定",
     proposalReview: modal.approved ? "确认通过申请" : "拒绝申请",
     launch: "启动实际执行",
@@ -3202,6 +3236,16 @@ function Modal({
             confirmed_stop: f.has("confirmed_stop"),
           },
           "任务已释放，已有成果继续保留",
+        );
+      } else if (kind === "resolveMessage") {
+        result = await mutate(
+          "message_resolve",
+          {
+            message_id: modal.message.id,
+            run_id: currentRun?.id,
+            note: value("note"),
+          },
+          "已记录处理结论，关注事项已更新",
         );
       } else if (kind === "message") {
         result = await mutate(
@@ -3977,6 +4021,21 @@ function Modal({
                     <Checkbox name="confirmed_stop" required />
                     已停止相关写入，并保存必要检查点
                   </label>
+                </>
+              )}
+              {kind === "resolveMessage" && (
+                <>
+                  <p className="form-intro">{modal.message.body}</p>
+                  <Text
+                    label="处理结论"
+                    name="note"
+                    required
+                    multiline
+                    placeholder="说明已完成的处理、核对的成果或不再需要处理的原因"
+                  />
+                  <p className="fine-print">
+                    提交后从关注事项移除，原消息和处理结论继续保留在讨论中。
+                  </p>
                 </>
               )}
               {kind === "message" && (

@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { WorkGuide, ExecutionPlan } from "../../../server/types.js";
-import type { Task } from "../types";
+import type { Task, Run, Message } from "../types";
+import { RequestResolution } from "./request-resolution";
 
 const stageLabels: Record<WorkGuide["stage"], string> = {
   recover: "先恢复现场",
@@ -87,12 +88,20 @@ export function ExecutionGuide({
   onContext,
   onCopied,
   runNames,
+  currentRun,
+  tasks,
+  requestRevision,
+  onResolveRequest,
 }: {
   task: Task;
   loadGuide: (taskId: string, runId: string) => Promise<WorkGuide>;
   onContext: () => void;
   onCopied: () => void;
   runNames: Record<string, string>;
+  currentRun?: Run;
+  tasks: Task[];
+  requestRevision: string;
+  onResolveRequest: (message: Message) => void;
 }) {
   const [guide, setGuide] = useState<WorkGuide | null>(null);
   const [loading, setLoading] = useState(false);
@@ -129,7 +138,14 @@ export function ExecutionGuide({
     return () => {
       live = false;
     };
-  }, [task.id, task.version, task.owner_run_id, loadGuide, request]);
+  }, [
+    task.id,
+    task.version,
+    task.owner_run_id,
+    loadGuide,
+    request,
+    requestRevision,
+  ]);
   const copyAction = async () => {
     if (!guide) return;
     try {
@@ -260,8 +276,8 @@ export function ExecutionGuide({
               <summary>待处理请求与阻塞 · {guide.request_page.total}</summary>
               <div className="execution-instructions-body">
                 <p>
-                  这里仅展示消息。确认收到只表示已读；执行者实际处理后，通过 MCP
-                  relay_message_resolve 提交处理说明。原收件人可能属于旧会话。
+                  确认收到只表示已读。核对处理结果后，填写处理结论；执行者也可通过
+                  MCP relay_message_resolve 汇报。原收件人可能属于旧会话。
                 </p>
                 {guide.messages.map((message) => (
                   <div className="execution-request" key={message.id}>
@@ -284,6 +300,12 @@ export function ExecutionGuide({
                         : "尚未确认收到"}
                     </p>
                     <code>{message.id}</code>
+                    <RequestResolution
+                      message={message}
+                      currentRun={currentRun}
+                      tasks={tasks}
+                      onResolve={onResolveRequest}
+                    />
                   </div>
                 ))}
                 {guide.request_page.next_offset !== null && (

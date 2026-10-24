@@ -8,18 +8,18 @@
 
 需要 Node.js 24+。安装包已包含构建好的网页，首次运行由 npx 安装运行依赖，启动时自动打开看板。
 
-当前尚未发布到 npm。下载 `relayboard-0.4.0.tgz`，在下载目录运行：
+当前尚未发布到 npm。下载 `relayboard-0.4.1.tgz`，在下载目录运行：
 
 ```bash
-npx --yes --package=./relayboard-0.4.0.tgz relayboard
+npx --yes --package=./relayboard-0.4.1.tgz relayboard
 ```
 
 服务启动后保留终端，按 Ctrl+C 停止。再次运行会识别已有 Relayboard 并打开同一看板。
 
 ```bash
 # 改端口、指定数据目录或关闭自动开浏览器
-npx --yes --package=./relayboard-0.4.0.tgz relayboard --port 4320 --no-open
-npx --yes --package=./relayboard-0.4.0.tgz relayboard --data-dir /absolute/path/to/data
+npx --yes --package=./relayboard-0.4.1.tgz relayboard --port 4320 --no-open
+npx --yes --package=./relayboard-0.4.1.tgz relayboard --data-dir /absolute/path/to/data
 ```
 
 发布到 npm 后，公开安装入口就是以下命令；发布前请使用上面的本地包：
@@ -176,7 +176,7 @@ JSON
 
 接手包优先保留目标、约束和当前行动。整个指引 JSON 用顶层 `truncated`、`omissions` 和 `char_budget` 标明预算与省略（有效下限 6000 字符），其中 context 也有自己的 truncated。任一层有省略时，先按引用读取完整任务、决定或依赖，再确认已读。记录已存在不等于它已在当前工作区被接收；不同 worktree 的成果需要明确集成。
 
-未处理请求通过 `relay_work_requests {task_id, offset, limit}` 分页恢复，包含当前任务、祖先任务以及发给旧负责人的 request/blocker。返回 items/total/next_offset，继续到 next_offset 为 null。`message_ack` 只记已读；实际处理后用 `message_resolve {message_id, run_id, note}` 记录结论，任务现负责人可以处理继承请求。
+未处理请求通过 `relay_work_requests {task_id, offset, limit}` 分页恢复，包含当前任务、祖先任务以及发给旧负责人的 request/blocker。返回 items/total/next_offset，继续到 next_offset 为 null。`message_ack` 只记已读；实际处理后用 `message_resolve {message_id, run_id, note}` 记录结论，任务现负责人可以处理继承请求。网页关注事项、任务讨论和执行指引提供“标记已处理”，填写实际处理结论后提醒消失，原消息及结论继续保留。原收件会话结束后，可切换人工管理视角处理；人工调用可省略 run_id，agent 始终提供自己的有效 run_id。任务已完成也可能有真正的新请求，因此不会按任务状态直接隐藏它们。
 
 保存事实要发生在失去上下文之前。定期报告失败尝试、结果未知的操作和下一步；支持的钩子导出已经保存的状态，不会凭空恢复未汇报进度。对于上游直接拒绝超限请求的情况，应依靠之前的持续检查点恢复。新执行者遇到模糊步骤、缺少能力、范围不足或契约冲突时报告阻塞，不自行扩张任务。
 
@@ -252,7 +252,7 @@ npm run web:dev     # 另一个终端保留 npm start；Vite 在 5173 代理本�
 ```bash
 npm pack --pack-destination /absolute/path/to/releases
 # 核对包内容和发布身份后，发布已经验证过的同一个包：
-npm publish /absolute/path/to/releases/relayboard-0.4.0.tgz --access public --registry=https://registry.npmjs.org
+npm publish /absolute/path/to/releases/relayboard-0.4.1.tgz --access public --registry=https://registry.npmjs.org
 ```
 
 本项目尚未公开发布到 npm。安装包验证结果以对应版本的 `VALIDATION.md` 为准；发布者需使用有包名发布权限的 npm 账号。

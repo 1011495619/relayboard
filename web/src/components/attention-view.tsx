@@ -7,10 +7,13 @@ import {
   EmptyTitle,
   EmptyDescription,
 } from "@/components/ui/empty";
-import type { Snapshot, Task } from "../types";
+import type { Snapshot, Task, Run, Message } from "../types";
+import { RequestResolution } from "./request-resolution";
 
 interface Props {
   data: Snapshot;
+  currentRun?: Run;
+  resolveRequest: (message: Message) => void;
   openTask: (task: Task) => void;
   openBoard: () => void;
   openDiscussions: () => void;
@@ -66,6 +69,8 @@ function attention(task: Task, data: Snapshot) {
 
 export function AttentionView({
   data,
+  currentRun,
+  resolveRequest,
   openTask,
   openBoard,
   openDiscussions,
@@ -170,35 +175,50 @@ export function AttentionView({
             (run) => run.id === message.to_run_id,
           );
           return (
-            <button
-              className="attention-row"
-              key={message.id}
-              onClick={() => (task ? openTask(task) : openDiscussions())}
-            >
-              <AlertCircle className="attention-row-icon" aria-hidden="true" />
-              <div className="attention-row-content">
-                <div className="attention-row-title">
-                  <span className="task-id">
-                    {task?.short_id || "项目请求"}
+            <div key={message.id} className="flex flex-col gap-2">
+              <button
+                className="attention-row"
+                onClick={() => (task ? openTask(task) : openDiscussions())}
+              >
+                <AlertCircle
+                  className="attention-row-icon"
+                  aria-hidden="true"
+                />
+                <div className="attention-row-content">
+                  <div className="attention-row-title">
+                    <span className="task-id">
+                      {task?.short_id || "项目请求"}
+                    </span>
+                    <strong>
+                      {message.kind === "blocker"
+                        ? "待处理阻塞消息"
+                        : "待处理协作请求"}
+                    </strong>
+                  </div>
+                  <p>{message.body}</p>
+                  <span className="attention-row-meta">
+                    原收件人：
+                    {recipient?.name ||
+                      message.to_run_id ||
+                      "项目协作成员"} ·{" "}
+                    {message.acknowledged_at
+                      ? "已读，尚未处理"
+                      : "尚未确认收到"}
                   </span>
-                  <strong>
-                    {message.kind === "blocker"
-                      ? "待处理阻塞消息"
-                      : "待处理协作请求"}
-                  </strong>
                 </div>
-                <p>{message.body}</p>
-                <span className="attention-row-meta">
-                  原收件人：
-                  {recipient?.name ||
-                    message.to_run_id ||
-                    "项目协作成员"} ·{" "}
-                  {message.acknowledged_at ? "已读，尚未处理" : "尚未确认收到"}
-                </span>
-              </div>
-              <Badge variant="outline">等待处理</Badge>
-              <ArrowRight className="attention-row-arrow" aria-hidden="true" />
-            </button>
+                <Badge variant="outline">等待处理</Badge>
+                <ArrowRight
+                  className="attention-row-arrow"
+                  aria-hidden="true"
+                />
+              </button>
+              <RequestResolution
+                message={message}
+                currentRun={currentRun}
+                tasks={data.tasks}
+                onResolve={resolveRequest}
+              />
+            </div>
           );
         })}
         {omittedRequests.map(({ taskId, count }) => {

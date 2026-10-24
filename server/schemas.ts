@@ -387,9 +387,9 @@ export const commands = {
   },
   message_resolve: {
     description:
-      "Record how a request or blocker was handled. Reading/acknowledging a message is not resolving it; the current task owner may resolve requests inherited at handoff.",
+      "Record how a request or blocker was handled. Agents supply their active run_id; the current task owner may resolve inherited requests. Human management may omit run_id to handle historical requests after their sessions ended. Reading/acknowledging is not resolution; completed tasks may still have genuine open requests.",
     schema: z
-      .object({ message_id: id, run_id: id, note: text.min(1) })
+      .object({ message_id: id, run_id: id.optional(), note: text.min(1) })
       .strict(),
   },
   message_ack: {

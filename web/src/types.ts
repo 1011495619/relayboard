@@ -12,6 +12,7 @@ import type {
   TaskStatus,
   Artifact,
   Verification,
+  Message,
 } from "../../server/types.js";
 import type { CommandInput, Runtime } from "../../server/schemas.js";
 export type {
@@ -26,6 +27,7 @@ export type {
   Artifact,
   Verification,
   Runtime,
+  Message,
 };
 export type Run = Snapshot["runs"][number];
 export type Eligible = Eligibility & { task: Task };
@@ -67,6 +69,7 @@ export type ModalKind =
   | "scope"
   | "release"
   | "message"
+  | "resolveMessage"
   | "decision"
   | "proposalReview"
   | "launch"
@@ -76,6 +79,7 @@ export type ModalKind =
   | "worktree"
   | "context";
 interface ModalFields {
+  message?: Message;
   task?: Task;
   parent?: { id: string; runtime?: Runtime; workdir?: string };
   project?: Project;
@@ -104,6 +108,7 @@ export type ModalState = ModalFields &
           | "release";
         task: Task;
       }
+    | { kind: "resolveMessage"; message: Message }
     | { kind: "proposalReview"; proposal: Proposal; approved: boolean }
     | { kind: "launch" | "logs" | "runEnd" | "dispatch"; run: Run }
     | { kind: "context"; task: Task; packet: ContextPacket }

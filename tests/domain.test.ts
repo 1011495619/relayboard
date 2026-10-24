@@ -712,3 +712,146 @@ test("two independent SQLite connections racing a claim yield exactly one owner"
   assert.equal(f.s.task(task.id).claim_epoch, 1);
   await Promise.all(exits);
 });
+
+test("historical acknowledged requests can be explicitly resolved after task acceptance and recipient exit without hiding new requests", (t) => {
+  const f = fixture(t),
+    run = f.register();
+  const task = f.claim(f.create(), run);
+  const messages = Array.from({ length: 4 }, (_, i) => {
+    const message = f.s.execute("message_send", {
+      project_id: f.project.id,
+      task_id: task.id,
+      to_run_id: run.id,
+      kind: i === 0 ? "request" : "blocker",
+      body: `历史问题 ${i}`,
+    });
+    f.s.execute("message_ack", { message_id: message.id, run_id: run.id });
+    return message;
+  });
+  f.checkpoint(task, run);
+  const submitted = f.s.execute("task_submit", {
+    task_id: task.id,
+    run_id: run.id,
+    claim_epoch: task.claim_epoch,
+    summary: "修复已验证",
+  });
+  f.s.execute("task_review", {
+    task_id: task.id,
+    expected_version: submitted.version,
+    accepted: true,
+    note: "独立核验成果",
+  });
+  f.s.execute("run_end", {
+    run_id: run.id,
+    status: "ended",
+    note: "实际会话已结束",
+  });
+  assert.equal(
+    f.s.query("snapshot", { project_id: f.project.id }).attention
+      ?.requests_total,
+    4,
+  );
+  for (const message of messages) {
+    const resolved = f.s.execute("message_resolve", {
+      message_id: message.id,
+      note: `核对已验收成果，${message.body}已落实`,
+    });
+    assert.ok(resolved.resolved_at);
+    assert.equal(resolved.resolved_by, "human");
+    assert.ok(resolved.acknowledged_at);
+    assert.match(resolved.resolution!, /已验收成果/);
+  }
+  const snapshot = f.s.query("snapshot", { project_id: f.project.id });
+  assert.equal(snapshot.attention?.requests_total, 0);
+  assert.deepEqual(snapshot.attention?.request_counts, {});
+  assert.equal(snapshot.tasks[0].status, "done");
+  assert.equal(f.s.query("work_requests", { task_id: task.id }).total, 0);
+  assert.equal(
+    snapshot.messages.filter((m) => messages.some((old) => old.id === m.id))
+      .length,
+    4,
+  );
+  const newRequest = f.s.execute("message_send", {
+    project_id: f.project.id,
+    task_id: task.id,
+    kind: "request",
+    body: "完成后新提出的需求，仍须处理",
+  });
+  assert.equal(
+    f.s.query("snapshot", { project_id: f.project.id }).attention
+      ?.requests_total,
+    1,
+  );
+  assert.equal(
+    f.s.query("work_requests", { task_id: task.id }).items[0].id,
+    newRequest.id,
+  );
+  const reopened = new Store(f.db);
+  t.after(() => reopened.close());
+  assert.ok(reopened.get("message", messages[0].id)?.resolved_at);
+});
+
+test("request handling retains agent ownership checks and the original resolution on repeated submission", (t) => {
+  const f = fixture(t),
+    run = f.register(),
+    outsider = f.register("旁观执行者");
+  const message = f.s.execute("message_send", {
+    project_id: f.project.id,
+    to_run_id: run.id,
+    kind: "request",
+    body: "实际请求",
+  });
+  assert.throws(
+    () =>
+      f.s.execute("message_resolve", {
+        message_id: message.id,
+        run_id: outsider.id,
+        note: "不属本会话",
+      }),
+    code("NOT_RECIPIENT"),
+  );
+  f.s.execute("run_end", {
+    run_id: run.id,
+    status: "ended",
+    note: "执行者实际结束",
+  });
+  assert.throws(
+    () =>
+      f.s.execute("message_resolve", {
+        message_id: message.id,
+        run_id: run.id,
+        note: "旧执行者",
+      }),
+    code("RUN_INACTIVE"),
+  );
+  assert.throws(() =>
+    f.s.execute("message_resolve", { message_id: message.id, note: " " }),
+  );
+  const resolved = f.s.execute("message_resolve", {
+    message_id: message.id,
+    note: "人工核验后的具体结论",
+  });
+  const repeated = f.s.execute("message_resolve", {
+    message_id: message.id,
+    note: "重复点击的其他文案",
+  });
+  assert.deepEqual(repeated, resolved);
+  assert.equal(
+    f.store.events(f.project.id).filter((e) => e.type === "message.resolved")
+      .length,
+    1,
+  );
+  const discussion = f.s.execute("message_send", {
+    project_id: f.project.id,
+    kind: "discussion",
+    body: "一般讨论",
+  });
+  assert.throws(
+    () =>
+      f.s.execute("message_resolve", {
+        message_id: discussion.id,
+        note: "不是请求",
+      }),
+    code("NOT_REQUEST"),
+  );
+});

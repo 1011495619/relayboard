@@ -668,15 +668,18 @@ export class Service {
     args: CommandArgs<"message_resolve">,
   ): CommandResults["message_resolve"] {
     const message = this.get("message", args.message_id),
-      run = this.sameProject(message.project_id, "run", args.run_id);
+      run = args.run_id
+        ? this.sameProject(message.project_id, "run", args.run_id)
+        : null;
     ensure(
-      run.status === "active",
+      !run || run.status === "active",
       "RUN_INACTIVE",
       "请使用有效执行会话处理请求",
     );
     const task = message.task_id ? this.task(message.task_id) : null;
     ensure(
-      message.to_run_id === run.id ||
+      !run ||
+        message.to_run_id === run.id ||
         task?.owner_run_id === run.id ||
         (!!task && this.ancestors(task).some((p) => p.owner_run_id === run.id)),
       "NOT_RECIPIENT",
@@ -687,14 +690,15 @@ export class Service {
       "NOT_REQUEST",
       "此消息不是待处理请求",
     );
+    if (message.resolved_at) return message;
     const result = this.update("message", message, {
       resolved_at: now(),
-      resolved_by: run.id,
+      resolved_by: run?.id || "human",
       resolution: args.note,
     });
     this.emit(message.project_id, "message.resolved", {
       task_id: message.task_id,
-      run_id: run.id,
+      run_id: run?.id,
       message_id: message.id,
       summary: args.note,
     });
