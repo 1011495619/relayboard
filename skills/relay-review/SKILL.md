@@ -3,26 +3,24 @@ name: relay-review
 description: 核对交付证据，验收子任务和集成结果。 用于 Relayboard 项目中的独立验收者流程，支持 Codex、Claude Code、pi 及原生子 agent；需已连接共享 Relayboard 服务。
 ---
 
-# 验收与集成
+# Independently accept the delivered version
 
-Use the running Relayboard service as the shared state store. Respect the project objective and the user's existing permissions. MCP tools are named `relay_*` (a client may add a prefix). Discover their schemas before supplying fields. For true MCP through the terminal, use `relayboard tools` for a compact inventory, `relayboard tools relay_agent_register` for the exact input schema, and `relayboard call relay_agent_register -` with JSON on stdin. `call` connects to the running shared `/mcp` endpoint. For REST CLI, use the absolute CLI path from `/api/integration`: `node <cli> query <name> -` or `node <cli> command <operation> -`, sending a JSON object on stdin. The CLI uses RELAYBOARD_URL and optional RELAYBOARD_TOKEN; do not log tokens.
+Use the shared running Relayboard service. Discover one tool schema with `relayboard tools <tool>`; invoke real MCP with `relayboard call <tool> -` and JSON on stdin. The service URL is `RELAYBOARD_URL`; inherit optional `RELAYBOARD_TOKEN` without logging it. Register this session with `relay_agent_register`, retain `run.id` (not `agent.id`), and use a new Run for a new chat. Never reuse another executor's identity.
 
-Register the current session with `relay_agent_register`; it returns `{ agent, run }`. Retain `run.id` for claims, checkpoints and inbox; `agent.id` is the logical identity. A new chat gets a new Run; logical agent identity does not transfer task ownership. Read focused `relay_project`, `relay_task`, `relay_context` and `relay_inbox` queries. Respect `truncated` and fetch missing referenced facts when needed; avoid loading the entire event history. Acknowledge addressed messages and record agreed interface decisions with `relay_decision_record`.
+Read the submitted task, acceptance, execution instructions, relevant decisions, artifacts and verification. A reviewer reads `relay_task`/`relay_context` and may use read-only `relay_work_next` for the owner's guide; viewing a guide does not authorize reporting as that owner.
 
-Use latest `expected_version` for structural/ownership changes and the returned `claim_epoch` for owned updates. On stale state, re-read and reconsider. A heartbeat is a liveness report, not work or proof of exit. Scope checks coordinate cooperating clients; actual parallel file isolation requires separate Git worktrees. If the service is unreachable, save IDs, epoch, facts and next step locally, restore the connection before shared ownership changes or new parallel dispatch.
+## Verify the actual result
 
-## Verify independently
+Use a different reviewer Run or human acceptance. Inspect the actual files, commit/worktree and dependent interfaces. Reproduce checks appropriate to the change. A service-observed revision identifies code state; it does not certify agent-reported commands were executed or that semantic correctness follows.
 
-Use an independent reviewer Run or the human. Read the task acceptance, relevant decisions, current artifacts and recorded verification. Inspect the actual files/commit/worktree and reproduce checks appropriate to the change. Past logs only establish the recorded version and time. Keep the reviewer independent of the implementing Run; read-only review is usually enough.
+Check evidence freshness against the delivered code. Old logs only establish their recorded version/time. Inspect failed attempts and uncertain actions rather than treating a complete step checklist as proof. Missing required artifacts, unresolved blockers or stale verification need a concrete correction.
 
-Check that the delivered outcome matches the acceptance, scope and interfaces, and that failed or missing evidence is not presented as a passing result. A submitted task is still waiting for acceptance.
-
-If the delivery contains commits, apply [git-commit-style](../git-commit-style/SKILL.md): verify the single-purpose diff, allowed type, bounded title and Chinese rationale. Check actual changes and evidence as well as the message format.
+For commits, apply [git-commit-style](../git-commit-style/SKILL.md): single purpose, allowed type, title within 50 characters and Chinese rationale. Review the diff as well as its message.
 
 ## Accept or return
 
-Use `relay_task_review` with `accepted: true` only after the evidence supports the complete acceptance. Supply the reviewer's own identity and current expected version as required by the tool schema. If incomplete, use `relay_task_review` with `accepted: false` with actionable observations, artifact locations and the next correction. Do not invent a passing command or substitute the implementer's identity for a reviewer.
+Use `relay_task_review` with your own `reviewer_run_id`, latest `expected_version`, accepted result and an evidence-based note. Accept only when the full task acceptance is supported. Otherwise return with specific observations, affected artifacts and next correction. The implementing Run does not self-accept.
 
-For a coordinator, verify all required children have been accepted and review fresh integration evidence produced after their acceptance. Child success alone does not establish that the combined result works. If integration fails, return the coordinator with concrete findings and coordinate any new executable work through the shared board.
+For a coordinator, check all required children are accepted, exact delivered revisions are integrated and a fresh passing integration checkpoint was saved after child acceptance. Child success alone is insufficient. Preserve review conclusions in durable messages/decisions; “acknowledged” only records receipt of a message.
 
-Save the review result and affected task IDs in durable messages/decisions as appropriate. Acceptance is an evidence-backed state change, not a button used to clear the board.
+For independent recovery trials, give the new executor only the service connection, assigned task and relevant Skill. Record actual model/client, human interventions, missed constraints, repeated work and final acceptance. Do not describe a Codex trial as a smaller-model or Claude/pi trial.

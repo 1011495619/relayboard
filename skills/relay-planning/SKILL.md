@@ -3,24 +3,31 @@ name: relay-planning
 description: 拆分可验收任务，协商范围和依赖。 用于 Relayboard 项目中的协调者流程，支持 Codex、Claude Code、pi 及原生子 agent；需已连接共享 Relayboard 服务。
 ---
 
-# 规划与分工
+# Plan executable handoffs
 
-Use the running Relayboard service as the shared state store. Respect the project objective and the user's existing permissions. MCP tools are named `relay_*` (a client may add a prefix). Discover their schemas before supplying fields. For true MCP through the terminal, use `relayboard tools` for a compact inventory, `relayboard tools relay_agent_register` for the exact input schema, and `relayboard call relay_agent_register -` with JSON on stdin. `call` connects to the running shared `/mcp` endpoint. For REST CLI, use the absolute CLI path from `/api/integration`: `node <cli> query <name> -` or `node <cli> command <operation> -`, sending a JSON object on stdin. The CLI uses RELAYBOARD_URL and optional RELAYBOARD_TOKEN; do not log tokens.
+Use the shared running Relayboard service. Discover one tool schema with `relayboard tools <tool>`; invoke real MCP with `relayboard call <tool> -` and JSON on stdin. The service URL is `RELAYBOARD_URL`; inherit optional `RELAYBOARD_TOKEN` without logging it. Register this session with `relay_agent_register`, retain `run.id` (not `agent.id`), and use a new Run for a new chat. Never reuse another executor's identity.
 
-Register the current session with `relay_agent_register`; it returns `{ agent, run }`. Retain `run.id` for claims, checkpoints and inbox; `agent.id` is the logical identity. A new chat gets a new Run; logical agent identity does not transfer task ownership. Read focused `relay_project`, `relay_task`, `relay_context` and `relay_inbox` queries. Respect `truncated` and fetch missing referenced facts when needed; avoid loading the entire event history. Acknowledge addressed messages and record agreed interface decisions with `relay_decision_record`.
+Read existing tasks and `relay_eligible` before creating work. Distinguish ready work, negotiation and unmet dependencies. A list is not a reservation; claims recheck current conflicts.
 
-Use latest `expected_version` for structural/ownership changes and the returned `claim_epoch` for owned updates. On stale state, re-read and reconsider. A heartbeat is a liveness report, not work or proof of exit. Scope checks coordinate cooperating clients; actual parallel file isolation requires separate Git worktrees. If the service is unreachable, save IDs, epoch, facts and next step locally, restore the connection before shared ownership changes or new parallel dispatch.
+## Write instructions the next executor can follow
 
-## Build a claimable plan
+Every executable task needs an outcome, acceptance evidence, narrow write paths/resources and dependencies. Add `execution` when the task benefits from an ordered procedure:
 
-Read existing tasks and `relay_eligible` before adding work. Distinguish ready work, a negotiation opportunity and work waiting for a dependency. A list is not a reservation; atomic claim rechecks current conflicts.
+- `inputs`: exact artifacts, contracts and prerequisites to read or receive.
+- `outputs`: deliverables and their expected locations.
+- `steps`: stable unique IDs, title, concrete instructions, `done_when` and `on_failure` for each step.
+- `stop_when`: conditions requiring a blocker or coordination instead of improvisation.
 
-Define each executable child's outcome, acceptance evidence, narrow write paths, exclusive resources, capabilities and dependencies. Use sibling indices `@0`, `@1` in a split only with their zero-based meaning. Avoid assigning overlapping file ranges to concurrent writers; separate worktrees still need an agreed interface and integration order. A coordinator owns planning and integration, not exclusive execution of the whole subtree.
+Specify what can be observed, not an implementation guess presented as fact. Keep steps at meaningful work boundaries; allow judgment within each step. Provide a useful failure action such as inspecting a particular contract, recording a failed test or requesting a named dependency. A vague “continue implementing” instruction forces the next agent to re-plan.
 
-Use `relay_task_split` inside your assigned boundary; preserve existing progress and keep the newly returned epoch. Someone else's claimed work requires `relay_proposal_create` and an owner/human resolution. A manual-planning project requires human confirmation. Report your actual actor identity. Existing session permissions remain the boundary for dispatch.
+Record agreed interfaces using `relay_decision_record` with affected task IDs before parallel writers start. Distinct worktrees isolate files but do not establish compatibility. Define how exact commits/artifacts reach dependent worktrees and reserve coordinator integration checks. “Dependency done” alone does not prove its revision is present locally.
 
-Reserve an integration outcome on the coordinator. Define the contract before dependent writers start, record it as a decision and make changes visible to every affected owner. Scope expansion uses `relay_scope_request`; expand upstream boundaries first. Check the entire descendant tree against project depth and concurrency budgets before dispatching.
+## Coordinate ownership
 
-## Exit condition
+Use `relay_task_split` on your own task within its boundary. It converts the parent to coordinator and returns a new `parent.claim_epoch`; retain it. Sibling dependency indices `@0`, `@1` are zero-based. Creating children under an assigned coordinator requires its owner or a confirmed proposal.
 
-Leave tasks small enough to claim, with explicit dependencies and no known conflicting writers. Save a planning checkpoint naming decisions, unresolved proposals and the next claimable action. Planning is not accepted completion of implementation.
+For someone else's claimed task, use `relay_proposal_create` and wait for owner/human resolution. Manual-planning projects require human confirmation. Always supply your actual actor identity. Scope expansion uses `relay_scope_request`, with upstream boundaries expanded first. Keep the entire descendant tree within project depth/concurrency budgets.
+
+Dispatch explicit leaf tasks. Their executors use `work_start` → read guide → `work_report recover` → current step. Plan or contract changes require fresh recovery; communicate the reason and preserve useful completed-work evidence. Do not silently take ownership or treat the coordinator as an exclusive writer of the whole subtree.
+
+Leave a planning checkpoint naming confirmed decisions, unresolved proposals and the next action. Planning completion is not implementation acceptance. For commits, apply [git-commit-style](../git-commit-style/SKILL.md).

@@ -3,35 +3,36 @@ name: relay-execution
 description: 领取工作、保存检查点、交付证据。 用于 Relayboard 项目中的执行者流程，支持 Codex、Claude Code、pi 及原生子 agent；需已连接共享 Relayboard 服务。
 ---
 
-# 领取与执行
+# Execute the next guided step
 
-Use the running Relayboard service as the shared state store. Respect the project objective and the user's existing permissions. MCP tools are named `relay_*` (a client may add a prefix). Discover their schemas before supplying fields. For true MCP through the terminal, use `relayboard tools` for a compact inventory, `relayboard tools relay_agent_register` for the exact input schema, and `relayboard call relay_agent_register -` with JSON on stdin. `call` connects to the running shared `/mcp` endpoint. For REST CLI, use the absolute CLI path from `/api/integration`: `node <cli> query <name> -` or `node <cli> command <operation> -`, sending a JSON object on stdin. The CLI uses RELAYBOARD_URL and optional RELAYBOARD_TOKEN; do not log tokens.
+Use the shared running Relayboard service. Discover one tool schema with `relayboard tools <tool>`; invoke real MCP with `relayboard call <tool> -` and JSON on stdin. The service URL is `RELAYBOARD_URL`; inherit optional `RELAYBOARD_TOKEN` without logging it. Register this session with `relay_agent_register`, retain `run.id` (not `agent.id`), and use a new Run for a new chat. Never reuse another executor's identity.
 
-Register the current session with `relay_agent_register`; it returns `{ agent, run }`. Retain `run.id` for claims, checkpoints and inbox; `agent.id` is the logical identity. A new chat gets a new Run; logical agent identity does not transfer task ownership. Read focused `relay_project`, `relay_task`, `relay_context` and `relay_inbox` queries. Respect `truncated` and fetch missing referenced facts when needed; avoid loading the entire event history. Acknowledge addressed messages and record agreed interface decisions with `relay_decision_record`.
+## Start or resume
 
-Use latest `expected_version` for structural/ownership changes and the returned `claim_epoch` for owned updates. On stale state, re-read and reconsider. A heartbeat is a liveness report, not work or proof of exit. Scope checks coordinate cooperating clients; actual parallel file isolation requires separate Git worktrees. If the service is unreachable, save IDs, epoch, facts and next step locally, restore the connection before shared ownership changes or new parallel dispatch.
+Call `relay_work_start {run_id, task_id?}`. Read the returned guide before editing. An unavailable result means inspect the reasons, negotiate or select independent eligible work. A claimed task owned by another Run needs explicit handoff; registration and work_start do not transfer it.
 
-## Claim and work
+At `recover`, inspect actual cwd, branch, local changes, relevant processes and dependency artifacts. Read the full decisions named in the guide, following omission references when truncated. Report `kind: "recover"` with observed facts, `read_decision_ids` and dependency receipts for artifacts actually received in this worktree: copy each service-generated dependency revision from the guide, and explain the actual receipt in note. Read all relevant decisions with task_id and pagination when the bounded guide omits any. Do not acknowledge unread contracts or another branch's unreceived artifacts.
 
-Inspect the actual worktree, branch, local changes and relevant processes. Use `relay_eligible` for this Run, then `relay_task_claim` with the task's latest version. Store the returned epoch. A task in reconciliation must complete `relay_task_reconcile` before writing.
+## Work and report
 
-Stay within assigned paths and resources. Ask for `relay_scope_request` before expanding them. If blocked by a shared contract or another owner, persist the blocker, message the relevant owner, and choose independent work only through a separate claim. Do not silently take over an active task.
+Use `relay_work_next` after interruptions or changed state. Submit reports with the latest returned `handle` unchanged. The service checks ownership, epoch and task version; on a stale result, re-read rather than replaying old state.
 
-## Save facts, not narration
+- `progress`: save partial changes, facts, failed attempts, uncertain outcomes and one concrete next step.
+- `step`: complete only the guide's current ordered step, using its `step_id` and evidence of `done_when`. A passing title or assertion alone is not evidence.
+- `blocked`: explain the missing input, contract conflict or capability needed. Message the relevant coordinator and preserve unfinished state.
+- `verify`: supply a nonempty verification array; record commands actually executed, their observed results and pass/fail values, with exact artifacts. Follow the guide when checks fail or evidence becomes stale.
+- `submit`: request independent acceptance once the guide permits delivery. Submission does not accept the task.
 
-Call `relay_task_checkpoint` after meaningful progress, changed requirements, a failed approach worth preserving, and before compaction, delegation, long operations or session exit. Record:
+When no execution plan exists, use `progress` with `ready_for_verification: true` once ready for checks. A planned task becomes ready after its ordered steps complete.
 
-- Observed changes and exact artifact paths or commits.
-- Commands actually run, their results and whether they passed.
-- Unfinished changes, blockers and unknown external-operation results.
-- One concrete next action.
+Stay inside assigned paths/resources. Request `relay_scope_request` for expansion. Stop and report when an execution instruction's `stop_when` applies, the next step is ambiguous, dependency artifacts are missing or an external action's result is unknown. Investigate unknown outcomes before retrying. Use distinct actual Git worktrees for parallel writers; interface consistency still needs coordination.
 
-Use concise summaries and file references instead of full logs. Read the directed inbox between meaningful steps; answer relevant requests and acknowledge them. Keep user constraints separate from assumptions and pending proposals. Heartbeats do not replace checkpoints.
+Save progress before compaction, delegation, long operations or exit when the client can execute a report. Export hooks only preserve records already saved. Read and acknowledge addressed messages between meaningful steps; a receipt is not proof that the request has been resolved.
 
-## Commit when the task calls for it
+## Commit and deliver
 
-Apply [git-commit-style](../git-commit-style/SKILL.md) when committing or writing a commit message: `类型(范围): 简述` within 50 characters; a blank line; Chinese rationale explaining why, without a file inventory. Use only `feat`, `fix`, `refactor`, `docs`. Each commit has one purpose and contains only your assigned changes. Record the commit hash and relevant checks in the task artifacts. A commit records changes; it does not accept the task.
+Apply [git-commit-style](../git-commit-style/SKILL.md): `类型(范围): 简述` within 50 characters, a blank line and Chinese rationale; only feat/fix/refactor/docs, one purpose per commit. Commit only assigned changes and record the exact hash and checks.
 
-## Submit
+Verification results reported by an agent remain self-reported even when the service observes the Git revision. Verify the intended version, then submit. A different Run or the human accepts. When transferring unfinished work, checkpoint and handle old writers/descendants before explicit handoff.
 
-Persist artifacts and relevant verification, then `relay_task_submit`. Keep failures visible. Submission requests independent acceptance; the implementing Run does not accept its own work. If transferring mid-task, save the checkpoint and resolve old writers before an ownership transfer.
+On older services without work tools, use `relay_eligible` → `relay_task_claim` → `relay_task_checkpoint` → `relay_task_submit`, retaining latest `expected_version` and returned `claim_epoch`; transferred tasks require `relay_task_reconcile`. Discover schemas first.

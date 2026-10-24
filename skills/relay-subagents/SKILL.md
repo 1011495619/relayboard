@@ -3,43 +3,35 @@ name: relay-subagents
 description: 登记每层身份，派发任务并报告进度。 用于 Relayboard 项目中的父子执行者流程，支持 Codex、Claude Code、pi 及原生子 agent；需已连接共享 Relayboard 服务。
 ---
 
-# 子 agent 协作
+# Give every descendant a recoverable task
 
-Use the running Relayboard service as the shared state store. Respect the project objective and the user's existing permissions. MCP tools are named `relay_*` (a client may add a prefix). Discover their schemas before supplying fields. For true MCP through the terminal, use `relayboard tools` for a compact inventory, `relayboard tools relay_agent_register` for the exact input schema, and `relayboard call relay_agent_register -` with JSON on stdin. `call` connects to the running shared `/mcp` endpoint. For REST CLI, use the absolute CLI path from `/api/integration`: `node <cli> query <name> -` or `node <cli> command <operation> -`, sending a JSON object on stdin. The CLI uses RELAYBOARD_URL and optional RELAYBOARD_TOKEN; do not log tokens.
+Use the shared running Relayboard service. Discover one tool schema with `relayboard tools <tool>`; invoke real MCP with `relayboard call <tool> -` and JSON on stdin. The service URL is `RELAYBOARD_URL`; inherit optional `RELAYBOARD_TOKEN` without logging it. Register this session with `relay_agent_register`, retain `run.id` (not `agent.id`), and use a new Run for a new chat. Never reuse another executor's identity.
 
-Register the current session with `relay_agent_register`; it returns `{ agent, run }`. Retain `run.id` for claims, checkpoints and inbox; `agent.id` is the logical identity. A new chat gets a new Run; logical agent identity does not transfer task ownership. Read focused `relay_project`, `relay_task`, `relay_context` and `relay_inbox` queries. Respect `truncated` and fetch missing referenced facts when needed; avoid loading the entire event history. Acknowledge addressed messages and record agreed interface decisions with `relay_decision_record`.
+## Register before native dispatch
 
-Use latest `expected_version` for structural/ownership changes and the returned `claim_epoch` for owned updates. On stale state, re-read and reconsider. A heartbeat is a liveness report, not work or proof of exit. Scope checks coordinate cooperating clients; actual parallel file isolation requires separate Git worktrees. If the service is unreachable, save IDs, epoch, facts and next step locally, restore the connection before shared ownership changes or new parallel dispatch.
+Register each actual child and grandchild separately with its correct `parent_run_id`, runtime, workdir, branch and delegated scope. Registration does not launch a process. Dispatch follows the user's existing permissions and project budgets.
 
-## Register before dispatch
+Assign an explicit executable task. Use `relay_work_start` with the child's own Run/task ID or atomic `relay_task_claim` and then a guide. Never pass the parent's Run/handle as the child's credentials; inherited environment variables may still identify the parent. Parallel writers use separate actual Git worktrees and agreed scopes/interfaces.
 
-Every native child and grandchild needs a separate `relay_agent_register` call with the correct `parent_run_id`. Use actual runtime, permitted delegated scope, workdir and branch. Registration records identity; it does not start a process. Existing user permissions determine whether dispatch itself is authorized.
-
-Assign each writer a separate executable task through atomic claim. A coordinator's broad boundary does not reserve every child. Do not reuse the parent's Run ID or claim epoch in child reports; inherited environment variables may still identify the parent. Keep the full descendant tree inside project depth and concurrency budgets.
-
-## Child packet
-
-Pass the following concrete values to each child:
+## Minimum child packet
 
 ```text
-Project / task ID:
-Your OWN Run ID / parent Run ID / claim epoch:
-Goal / acceptance criteria:
-Permitted write paths / exclusive resources:
-Actual worktree / branch:
-Dependencies / agreed interfaces:
-Checkpoint and inbox tools:
-Next action / reporting destination:
+Shared service URL and connection method:
+Project ID / assigned task ID:
+Your own Run ID / parent Run ID:
+Actual worktree / branch / allowed paths:
+Entry: work_start with your own Run and task
+Read guide, inspect actual state, report recover before editing
+Execute only the current step; report progress, blockers and delivery
+Parent reporting destination:
 ```
 
-Parallel code writers use distinct actual Git worktrees and disjoint agreed scopes. Record contracts before dispatch. Scope expansion goes through `relay_scope_request`; a child never expands beyond its parent's permitted envelope without upstream changes.
+Let the service provide current handles, steps, contracts and dependency receipts. Include tool access and how to fetch a missing/truncated record. If the assignment lacks executable instructions, clarify it before dispatch. Pass [git-commit-style](../git-commit-style/SKILL.md) when commits are part of the task.
 
 ## Report through every level
 
-Children checkpoint their own tasks and send directed blockers, deliveries and review requests to their parent. The parent reads and acknowledges those reports, then summarizes progress on the coordinator. If a child lacks direct service access, the parent explicitly forwards its actual report with source attribution; preserve the child's own identity and distinguish observed facts from an unverified claim.
+Each child uses `work_report` on its own task and sends directed blockers, delivery and review requests to its parent. Save actual facts before compaction/exit. The parent reads/acknowledges reports and summarizes coordinator progress; it does not fabricate a child's test results or completion.
 
-Use client lifecycle adapters where available. Otherwise report child starts, checkpoints, blockers, delivery and observed exits explicitly. `relay_run_heartbeat` observation distinguishes self/parent/adapter reports. An unseen child is unknown, not stopped or complete.
+Where native lifecycle events are unavailable, explicitly forward real child reports with their source. A relay message persists information; waking an external idle client needs a supported adapter/runner or polling. A registered or unseen child is not proof of a running/stopped process. Heartbeat observation (`self`, `parent`, `adapter`) retains provenance.
 
-Before transfer, preserve each active descendant and redirect reporting explicitly, or stop/release it with evidence. Never release an entire subtree merely because the parent chat ended. Child submission still requires independent acceptance; after required children are accepted, run and record fresh coordinator integration checks.
-
-When the assigned work includes Git commits, pass [git-commit-style](../git-commit-style/SKILL.md) in the child packet. Each child commits its own assigned purpose and reports exact hashes; the parent inspects those diffs before integration.
+Before parent handoff, handle every active descendant: preserve its task and redirect reports explicitly, or stop/release it with exit evidence. Never release a subtree solely because the parent chat ended. Independent acceptance follows child submission. After required children are accepted and their exact changes are integrated, record fresh coordinator verification.

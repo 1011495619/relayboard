@@ -2,24 +2,24 @@
 
 一个本机运行的共享任务服务。Codex、Claude Code、pi agent 及其子 agent 通过同一个后台协调任务，人通过网页查看目标、分工、修改范围、消息和成果。
 
-任务持久化在 SQLite，执行会话独立登记。窗口中断后，新会话读取接手包、核对现场并继续执行。
+任务持久化在 SQLite，执行会话独立登记。窗口中断后，新会话读取接手指引、核对现场并从当前步骤继续。执行说明保存输入、输出、每步完成条件和失败动作，减少接手者重新规划的负担。复杂技术判断仍需要具备相应能力的执行者。
 
 ## 启动
 
 需要 Node.js 24+。安装包已包含构建好的网页，首次运行由 npx 安装运行依赖，启动时自动打开看板。
 
-当前尚未发布到 npm。下载 `relayboard-0.3.0.tgz`，在下载目录运行：
+当前尚未发布到 npm。下载 `relayboard-0.4.0.tgz`，在下载目录运行：
 
 ```bash
-npx --yes --package=./relayboard-0.3.0.tgz relayboard
+npx --yes --package=./relayboard-0.4.0.tgz relayboard
 ```
 
 服务启动后保留终端，按 Ctrl+C 停止。再次运行会识别已有 Relayboard 并打开同一看板。
 
 ```bash
 # 改端口、指定数据目录或关闭自动开浏览器
-npx --yes --package=./relayboard-0.3.0.tgz relayboard --port 4320 --no-open
-npx --yes --package=./relayboard-0.3.0.tgz relayboard --data-dir /absolute/path/to/data
+npx --yes --package=./relayboard-0.4.0.tgz relayboard --port 4320 --no-open
+npx --yes --package=./relayboard-0.4.0.tgz relayboard --data-dir /absolute/path/to/data
 ```
 
 发布到 npm 后，公开安装入口就是以下命令；发布前请使用上面的本地包：
@@ -49,12 +49,12 @@ PORT=4320 RELAYBOARD_DATA_DIR=/absolute/path/to/data RELAYBOARD_TOKEN=YOUR_TOKEN
 
 ## 网页使用
 
-1. 创建项目，填写目标、用户约束和实际代码目录。也可以显式载入带标记的示例项目，示例不会启动任何 AI。
-2. 创建任务，写明验收标准、相对修改路径、独占共享资源和前置依赖。
-3. 登记真实执行会话，选择工具、工作目录、分支和父 Run。登记本身不启动进程。
-4. 在“领取工作”中选择执行者，查看可直接领取、可协商拆分、等待条件的任务。领取会重新检查条件。
-5. 执行过程中保存检查点、成果位置和实际验证结果。提交后进入“待验收”；独立审查通过才完成。
-6. 交接给另一工具时，停止旧写入，明确活动子任务继续还是停止。新负责人先核验现场。
+1. 创建项目，填写目标、用户约束和实际代码目录；示例项目不会启动 AI。
+2. 创建任务，定义验收、范围、资源和依赖。需要按顺序执行的任务可填写输入、输出、步骤、完成条件、失败动作和停止条件。
+3. 登记真实会话和正确父 Run。日常执行用 `work_start` 获取指引；它恢复自身工作或原子领取可领取任务，不会转走他人的任务。
+4. 按指引先核对文件、分支、进程与成果，读完必要契约，确认依赖成果已在本地，用 `work_report recover` 记录事实。
+5. 每次只执行当前步骤，用最新指引的 handle 汇报进展、步骤结果、阻塞和实际验证。提交后由其他执行者或人验收。
+6. 换工具或窗口时显式交接，处理旧写入和活动后代；新会话再次恢复核验。关注事项首页汇总需要处理的阻塞、验收和恢复工作。
 
 页面采用官方 shadcn `base-nova` 组件与 Base UI 交互基础、Tailwind v4，支持保存在本机的明暗主题。任务详情使用 Sheet，操作表单使用 Dialog；任务筛选和视图切换使用 Base UI Select / ToggleGroup。任务看板支持卡片与树形视图。执行者树显示每一层 Run、状态来源、最近进度和工作目录；修改范围显示当前写入占用；消息和决定分别保存讨论与已确认共识。
 
@@ -137,6 +137,47 @@ node lib/bin/relayboard.js command task_checkpoint - checkpoint-request-001 <<'J
 JSON
 ```
 
+## 按指引恢复与执行
+
+0.4.0 增加三个日常入口，底层协调工具继续保留：
+
+| MCP 工具 | 用途 |
+| --- | --- |
+| `relay_work_start` | 用自己的 Run 开始或恢复指定任务，也可选择合适的可领取工作。 |
+| `relay_work_next` | 只读获取当前阶段、下一步、核对清单、契约、依赖和警告。 |
+| `relay_work_report` | 使用最新 handle 报告恢复、进展、步骤、阻塞、验证或提交。 |
+
+```bash
+relayboard call relay_work_start - <<'JSON'
+{"run_id":"YOUR_RUN_ID","task_id":"TASK_ID"}
+JSON
+```
+
+先通过 `relay_agent_register` 取得 `run.id`。每次报告复制最新指引返回的 `handle`（任务、Run、执行权、任务版本及上下文摘要），不手工猜版本。`recover` 阶段检查实际工作区、分支、未提交改动、相关进程与成果；读完所需决定后填 `read_decision_ids`，依赖成果实际进入本地后才填写 `dependency_receipts`：revision 复制指引中的服务成果摘要（并非 Git hash），note 说明实际接收和核验过程。契约省略时用 `relay_decisions` 按 task_id 分页读全，再填全部必要的已读 ID。旧聊天中的“测试通过”只证明当时的版本。恢复核验与契约确认属于执行者报告，服务观察到 Git 状态也不等于服务亲自运行过测试。
+
+任务创建、更新和拆分可以提供 `execution`，例如：
+
+```json
+{
+  "inputs": ["契约 C-03 的完整内容", "已接收的接口提交"],
+  "outputs": ["src/session.ts 实现", "对应验证结果"],
+  "steps": [{
+    "id": "session-write",
+    "title": "实现会话写入",
+    "instructions": "遵循既有存储接口，在指定范围实现会话写入。",
+    "done_when": "成功和失败路径的行为验证通过，成果已保存。",
+    "on_failure": "记录失败命令和结果；若接口契约冲突，向协调者报告阻塞。"
+  }],
+  "stop_when": ["需要改动任务范围外路径", "契约与实际类型冲突"]
+}
+```
+
+步骤 ID 保持唯一、稳定。没有执行说明的旧任务仍可按验收标准和检查点继续。指引给出 `recover`、`execute`、`blocked`、`verify`、`submit`、`review`、`wait_children`、`done` 或 `unavailable` 阶段；读取实际 `next_action`，报告中填真实结果，不把模板占位文字当作证据。契约、计划或依赖变化后按新指引重新核验。所有步骤完成仍需实际验证与独立验收。没有步骤计划时，执行就绪后用 `progress` 和 `ready_for_verification: true` 进入验证；`verify` 必须包含实际执行的非空 verification 记录，失败后可修正再试。
+
+接手包优先保留目标、约束和当前行动。遇到 `truncated` 或遗漏提示，先按引用读取完整任务、决定或依赖，再确认已读。记录已存在不等于它已在当前工作区被接收；不同 worktree 的成果需要明确集成。
+
+保存事实要发生在失去上下文之前。定期报告失败尝试、结果未知的操作和下一步；支持的钩子导出已经保存的状态，不会凭空恢复未汇报进度。对于上游直接拒绝超限请求的情况，应依靠之前的持续检查点恢复。新执行者遇到模糊步骤、缺少能力、范围不足或契约冲突时报告阻塞，不自行扩张任务。
+
 ## 任务与并发约定
 
 - **任务与 Run 分离**：任务长期存在；新的窗口登记新 Run，通过明确交接接手旧任务。
@@ -204,15 +245,15 @@ npm run web:dev     # 另一个终端保留 npm start；Vite 在 5173 代理本�
 
 ## npm 打包与发布
 
-`npm pack` 会先构建网页，再按 `files` 白名单生成安装包；包内包含服务、CLI、网页、Skill 和适配器，排除源码开发依赖、数据库、日志和测试数据。用户安装阶段没有构建或下载浏览器的脚本。
+`npm pack` 会先构建服务端和网页，再按 `files` 白名单生成安装包；包内包含服务、CLI、网页、Skill 和适配器，排除源码开发依赖、数据库、日志和测试数据。用户安装阶段没有构建或下载浏览器的脚本。
 
 ```bash
 npm pack --pack-destination /absolute/path/to/releases
 # 核对包内容和发布身份后，发布已经验证过的同一个包：
-npm publish /absolute/path/to/releases/relayboard-0.3.0.tgz --access public --registry=https://registry.npmjs.org
+npm publish /absolute/path/to/releases/relayboard-0.4.0.tgz --access public --registry=https://registry.npmjs.org
 ```
 
-本次只生成、安装并验证了本地包，没有执行 npm 发布。发布者需使用有包名发布权限的 npm 账号。
+本项目尚未公开发布到 npm。安装包验证结果以对应版本的 `VALIDATION.md` 为准；发布者需使用有包名发布权限的 npm 账号。
 
 ## TypeScript 开发与终端 MCP
 

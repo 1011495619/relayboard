@@ -3,22 +3,22 @@
     "name": "task-continuity",
     "title": "协作入口",
     "role": "所有参与者",
-    "description": "加入项目、找回上下文、选择当前角色。",
-    "prompt": "先加入 Relayboard 项目，读取有界上下文，登记当前会话并检查可领取任务。"
+    "description": "登记会话，恢复现场，按服务指引继续下一步。",
+    "prompt": "登记当前真实会话，用 work_start 进入任务；读取指引并核对现场，报告 recover 后只执行当前一步。"
   },
   {
     "name": "relay-planning",
     "title": "规划与分工",
     "role": "协调者",
-    "description": "拆分可验收任务，协商范围和依赖。",
+    "description": "定义输入、输出、步骤、失败动作与并行契约。",
     "prompt": "读取项目目标与已有任务，规划可独立领取的子任务，检查写入范围、依赖和验收。"
   },
   {
     "name": "relay-execution",
     "title": "领取与执行",
     "role": "执行者",
-    "description": "领取工作、保存检查点、交付证据。",
-    "prompt": "检查 Relayboard 可领取任务，使用自己的 Run 领取一项工作，并持续保存事实检查点。"
+    "description": "按当前步骤执行，保存事实与证据，提交独立验收。",
+    "prompt": "用自己的 Run 调用 work_start，读取指引并完成恢复核验；使用最新 handle 经 work_report 汇报进展、步骤、阻塞和验证。"
   },
   {
     "name": "relay-subagents",
@@ -39,7 +39,7 @@
     "title": "交接与续接",
     "role": "交接双方",
     "description": "停止旧写入，保留现场，让新会话接手。",
-    "prompt": "为 Relayboard 任务保存交接包，核实旧写入者与后代状态，让新会话核验现场后继续。"
+    "prompt": "保存事实与未知结果，核实旧写入者和后代状态，显式交接；新会话用 work_start 获取指引并报告 recover 后继续。"
   },
   {
     "name": "git-commit-style",

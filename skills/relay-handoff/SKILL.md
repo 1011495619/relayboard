@@ -3,28 +3,30 @@ name: relay-handoff
 description: 停止旧写入，保留现场，让新会话接手。 用于 Relayboard 项目中的交接双方流程，支持 Codex、Claude Code、pi 及原生子 agent；需已连接共享 Relayboard 服务。
 ---
 
-# 交接与续接
+# Transfer ownership without losing the next action
 
-Use the running Relayboard service as the shared state store. Respect the project objective and the user's existing permissions. MCP tools are named `relay_*` (a client may add a prefix). Discover their schemas before supplying fields. For true MCP through the terminal, use `relayboard tools` for a compact inventory, `relayboard tools relay_agent_register` for the exact input schema, and `relayboard call relay_agent_register -` with JSON on stdin. `call` connects to the running shared `/mcp` endpoint. For REST CLI, use the absolute CLI path from `/api/integration`: `node <cli> query <name> -` or `node <cli> command <operation> -`, sending a JSON object on stdin. The CLI uses RELAYBOARD_URL and optional RELAYBOARD_TOKEN; do not log tokens.
+Use the shared running Relayboard service. Discover one tool schema with `relayboard tools <tool>`; invoke real MCP with `relayboard call <tool> -` and JSON on stdin. The service URL is `RELAYBOARD_URL`; inherit optional `RELAYBOARD_TOKEN` without logging it. Register this session with `relay_agent_register`, retain `run.id` (not `agent.id`), and use a new Run for a new chat. Never reuse another executor's identity.
 
-Register the current session with `relay_agent_register`; it returns `{ agent, run }`. Retain `run.id` for claims, checkpoints and inbox; `agent.id` is the logical identity. A new chat gets a new Run; logical agent identity does not transfer task ownership. Read focused `relay_project`, `relay_task`, `relay_context` and `relay_inbox` queries. Respect `truncated` and fetch missing referenced facts when needed; avoid loading the entire event history. Acknowledge addressed messages and record agreed interface decisions with `relay_decision_record`.
+## Prepare while the current session can still report
 
-Use latest `expected_version` for structural/ownership changes and the returned `claim_epoch` for owned updates. On stale state, re-read and reconsider. A heartbeat is a liveness report, not work or proof of exit. Scope checks coordinate cooperating clients; actual parallel file isolation requires separate Git worktrees. If the service is unreachable, save IDs, epoch, facts and next step locally, restore the connection before shared ownership changes or new parallel dispatch.
+Use `relay_work_report kind: "progress"` with the latest handle to save current facts, exact artifacts/commits, failed attempts, uncertain action outcomes and one next step. Read `relay_context` and export when needed. On older services use `relay_task_checkpoint`. Large logs stay in referenced files.
 
-## Prepare before context is lost
+Confirm required inputs, ordered steps, `done_when`, failure actions and `stop_when` are useful to a reader without the old chat. Preserve uncommitted changes and their worktree. Save facts before compaction; hooks can export existing records but do not recover progress that was never reported.
 
-Save `relay_task_checkpoint` with IDs, current epoch, objective, user constraints, actual changes, artifact paths, verification outcomes, failed approaches, unknown results, blockers and one next action. Request a bounded `relay_context` packet; persist it through the workspace export when needed. Keep large logs as referenced files. A packet supports recovery; the shared service remains authoritative.
+## Explicitly transfer
 
-## Transfer ownership
+Register a new Run for the destination. Stop the old writer and observe exit; managed processes must exit first. Heartbeat expiry is not exit evidence. Handle every active descendant: preserve its work and redirect reports, or stop/release it with actual evidence. Do not silently transfer or release the subtree.
 
-Stop the old writer and observe its exit. Managed processes must exit before transfer. Heartbeat expiry is not stop evidence. Handle every active descendant explicitly: preserve its execution with reporting redirected, or stop/release it with actual evidence. Keep dirty files and uncommitted work accounted for.
+Call `relay_task_handoff` using latest expected version, source identity, destination Run and explicit descendant policy. The service changes `claim_epoch`; old handles are stale. Unknown external writers require confirmed stop in a shared directory, or an isolated destination with recorded uncertainty and integration plan. Release only work known to have stopped.
 
-Call `relay_task_handoff` with latest expected version and the chosen destination Run according to the discovered schema. The epoch changes and old credentials become stale. Release only work that has actually stopped. Unknown external writers require confirmed stop in a shared directory, or an isolated destination with explicit uncertainty and a later integration plan.
+## Recover in the new window/client
 
-## Resume in a new client or chat
+1. Call `relay_work_start` with the new Run and assigned task after transfer. It does not itself take an occupied task.
+2. Read the guide and missing referenced records. Inspect actual cwd, branch, changes, processes and artifacts; investigate uncertain external operations before repeating them.
+3. Read required decisions in full. Receive the exact dependency revisions into this worktree and record receipts; accepted upstream tasks may live on other branches.
+4. Report `kind: "recover"` with the new guide's handle, observed facts, read decision IDs and actual dependency receipts. Follow refreshed guides when contracts, plans or dependencies change.
+5. Execute the current step, report its observed result and continue from the service's next action.
 
-Register a new Run for the new session, read focused context plus the inbox, and inspect real files, branch, worktree, processes and unfinished changes. Investigate unknown external-operation results before retrying. Compare actual observations with the old packet; use current server ownership and epoch.
+On an older service, read context/inbox and use `relay_task_reconcile` with observed facts and next step before writes. Keep unresolved discrepancies as blockers. When the service is unreachable, save a local checkpoint and restore connectivity before ownership changes or new parallel dispatch; use the shared database once reconnected.
 
-Call `relay_task_reconcile` with observed facts and next step before new writes. If destination isolation was used, preserve the old worktree and record how outstanding changes will be reconciled. Post a concise receipt naming what was recovered, what remains uncertain and the next action. Resume ordinary execution and checkpoints from that point.
-
-When code was committed, carry the exact commit hashes, worktree and uncommitted state into the handoff packet. Continue using [git-commit-style](../git-commit-style/SKILL.md) for subsequent commits.
+Carry exact commits, worktrees and uncommitted state. Apply [git-commit-style](../git-commit-style/SKILL.md) to subsequent commits. A capable recovery process reduces reliance on remembered chat; complex technical judgments may still need escalation to a suitable executor.

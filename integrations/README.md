@@ -9,7 +9,7 @@
   "mcpServers": {
     "relayboard": {
       "command": "npx",
-      "args": ["--yes", "relayboard@0.3.0", "mcp"],
+      "args": ["--yes", "relayboard@0.4.0", "mcp"],
       "env": { "RELAYBOARD_URL": "http://127.0.0.1:4317" }
     }
   }
@@ -22,9 +22,11 @@
 
 ```bash
 relayboard tools                         # 精简工具目录
-relayboard tools agent_register          # 只读取一个工具的完整 schema
-relayboard call projects '{}'
-relayboard call context - <<'JSON'
+relayboard tools work_start              # 只读取一个工具的完整 schema
+relayboard call work_start - <<'JSON'
+{"task_id":"TASK_ID","run_id":"YOUR_RUN_ID"}
+JSON
+relayboard call work_next - <<'JSON'
 {"task_id":"TASK_ID","run_id":"YOUR_RUN_ID","max_chars":6000}
 JSON
 ```
@@ -32,6 +34,24 @@ JSON
 `tools` / `call` 使用 MCP SDK 的 Streamable HTTP 连接；`query` / `command` 仍提供 REST 入口。工具名接受 `relay_` 前缀或短名称。服务错误和 MCP 校验错误返回非零退出码，保留可读错误；`RELAYBOARD_URL` 可以是服务根地址或以 `/mcp` 结尾的地址。
 
 `agent_register` 返回 `{agent, run}`，领取任务、检查点、收件箱应使用 **`run.id`**。每个子会话都读取自己的值。
+
+## 统一恢复入口
+
+登记后用 `work_start` 取得阶段和下一步。先读目标、约束、警告、契约与依赖；核对实际 cwd、分支、改动、进程和成果。使用返回的最新 `handle` 调用 `work_report`，`kind: "recover"` 填实际观察、完整读过的 `read_decision_ids` 和依赖成果实际进入本地后的 `dependency_receipts`。receipt 的 revision 使用 guide.dependencies 中的服务成果摘要（并非 Git hash），note 说明实际如何接收并确认本地已有成果。指引省略决定时，按 task_id 分页读取全部相关决定再确认。确认恢复后只做当前步骤，报告其观察结果，再读下一步。
+
+报告种类为 `recover`、`progress`、`step`、`blocked`、`verify`、`submit`。不要重用过期 handle；归属、契约、计划或依赖变化时重新获取指引。`work_start` 只恢复自身工作或领取合适任务，转交其他 Run 的任务仍需显式 handoff。旧服务缺少新工具时，使用 `eligible`/`task_claim`/`task_checkpoint`/`task_submit`，交接后先 `task_reconcile`。
+
+### 客户端能力边界
+
+| 接入方式 | 能提供什么 | 仍需执行者处理 |
+| --- | --- | --- |
+| 通用 HTTP/stdio MCP | 持久任务、步骤指引、检查点、消息与明确交接 | 主动登记、核验现场、汇报事实、读收件箱；MCP连接本身不观察全部原生子 agent。 |
+| 托管 CLI runner | 注入身份/任务入口、记录托管进程和日志；显式启用后可派发 | 模型仍按指引报告实际工作；退出不等于验收完成。 |
+| Claude PreCompact/Stop 钩子 | 导出服务中已经保存的任务状态 | 在仍可调用工具时先保存事实；钩子不从聊天推断尚未汇报进度。 |
+| pi 生命周期扩展 | 在支持事件处报告心跳、注入有界任务指引/消息、压缩前导出 | 真实成果、契约已读和依赖已接收仍需报告；事件取决于客户端版本。 |
+
+原生子 agent 自动发现与外部空闲窗口唤醒并非所有客户端共有。只在适配器实际支持并有观察证据时显示相应能力。较弱模型的恢复能力需以实际试验验证；项目不因存在步骤指引就声称它能解决所有复杂任务。
+
 
 以下本地路径均指安装包或 `npm run build` 生成的 `lib/` JavaScript。开发源码使用 `node --import tsx bin/relayboard.ts ...`；安装包用户直接运行 `relayboard`，无需 TypeScript 运行器。
 
@@ -117,14 +137,15 @@ pi --extension /absolute/path/to/relayboard/lib/integrations/pi-extension.js \
 
 ## 所有工具通用的子 agent 派发流程
 
-1. 协调父任务，明确子任务范围、依赖和验收标准。
-2. `agent_register` 携带父 Run，取得子 Run ID。
-3. 使用子 Run 原子领取子任务，取得自己的 `claim_epoch`。
-4. 将接手包、子 Run/任务 ID、实际目录、执行权版本和报告要求交给原生子 agent。
-5. 子 agent 保存检查点、读取收件箱、报告阻塞和交付；父 agent 汇总进度。
-6. 原生事件不可观察时，由父 agent 转报并标明来源。不要用原生进程还活着代替任务进度。
+1. 父协调者定义子任务输入、输出、步骤/完成条件/失败动作、范围、依赖和验收，记录受影响任务的接口契约。
+2. 派发前 `agent_register` 携带父 Run，取得每个子 agent 自己的 `run.id`；为并行写入准备真实独立 Git worktree。
+3. 子 agent 通过 `work_start` 原子领取明确任务，或父代派发前进行明确原子领取；不会静默接走其他负责人的任务。
+4. 给子 agent 服务连接、自己的 Run/任务 ID、实际目录/分支和报告目的地，让它读取当前指引；继承环境可能仍指向父身份。
+5. 子 agent 核验实际现场，读取完整契约并确认依赖成果，使用最新 handle 报告 `recover` 后执行当前步骤。
+6. 每个子 agent 报告部分进展、步骤结果、阻塞、验证和交付，父代读取并汇总。缺少直接服务访问时，转报真实来源，不把转报当作亲自观察。
+7. 子任务独立验收后，父代接收确切成果并运行新的集成验证，再提交协调任务。
 
-孙 agent 重复同一流程。对任何子 agent，继承的环境可能仍包含父 Run ID；必须使用明确派发包里的自身身份。
+孙 agent 重复同一流程。父会话中断时，仍在运行的后代需要明确保留及重定向报告，或观察停止后再释放；心跳失联不等于停止。
 
 ## 自主协作的边界
 
