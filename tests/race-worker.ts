@@ -1,6 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { Store } from "../server/store.js";
-import { Service } from "../server/domain.js";
+import { Store } from "../server/store.ts";
+import { Service } from "../server/domain.ts";
 if (!parentPort) throw new Error("Worker requires parent port");
 const store = new Store(workerData.db),
   s = new Service(store);

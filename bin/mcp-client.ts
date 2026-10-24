@@ -1,8 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { baseUrl } from "./client.js";
-import { ClientError, errorInfo } from "./errors.js";
+import { baseUrl } from "./client.ts";
+import { ClientError, errorInfo } from "./errors.ts";
 
 export function unwrapToolResult(result: CallToolResult): unknown {
   const texts = result.content

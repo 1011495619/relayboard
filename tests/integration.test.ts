@@ -1,9 +1,9 @@
 import test, { type TestContext } from "node:test";
 import type { AddressInfo } from "node:net";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppOptions } from "../server/app.js";
-import type { CommandInput, CommandName } from "../server/schemas.js";
-import type { CommandResult } from "../server/types.js";
+import type { AppOptions } from "../server/app.ts";
+import type { CommandInput, CommandName } from "../server/schemas.ts";
+import type { CommandResult } from "../server/types.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,8 +14,8 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { createApp } from "../server/app.js";
-import { createWorktree } from "../server/runner.js";
+import { createApp } from "../server/app.ts";
+import { createWorktree } from "../server/runner.ts";
 
 function mcpText(result: CallToolResult): string {
   const text = result.content.find((c) => c.type === "text");
@@ -467,7 +467,7 @@ test("real HTTP MCP guides a fresh executor through recovery, steps, verificatio
   let guide = (await call("work_start", {
     run_id: run.id,
     task_id: task.id,
-  })) as import("../server/types.js").WorkGuide;
+  })) as import("../server/types.ts").WorkGuide;
   assert.equal(guide.stage, "recover");
   guide = (await call("work_report", {
     handle: guide.handle,

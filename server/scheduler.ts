@@ -1,5 +1,5 @@
-import type { Service } from "./domain.js";
-import { errorInfo } from "../bin/errors.js";
+import type { Service } from "./domain.ts";
+import { errorInfo } from "../bin/errors.ts";
 
 /** Bounded local dispatcher. Only explicitly enabled Runs may start paid CLI work. */
 export interface SchedulerRunner {

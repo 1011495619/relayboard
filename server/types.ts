@@ -7,7 +7,7 @@ import type {
   DependencyReceipt,
   ExecutionStep,
   WorkHandle,
-} from "./schemas.js";
+} from "./schemas.ts";
 export type {
   Artifact,
   Verification,
@@ -16,7 +16,7 @@ export type {
   ExecutionStep,
   WorkHandle,
   DependencyReceipt,
-} from "./schemas.js";
+} from "./schemas.ts";
 
 export interface VersionedRecord {
   id: string;

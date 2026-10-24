@@ -14,10 +14,10 @@ import {
   statSync,
 } from "node:fs";
 import { resolve, join } from "node:path";
-import { runtimeRoot, runtimeExtension, runtimeNodeArgs } from "./config.js";
-import type { ProcessInfo } from "./types.js";
-import { errorInfo } from "../bin/errors.js";
-import { AppError, type Service } from "./domain.js";
+import { runtimeRoot, runtimeExtension, runtimeNodeArgs } from "./config.ts";
+import type { ProcessInfo } from "./types.ts";
+import { errorInfo } from "../bin/errors.ts";
+import { AppError, type Service } from "./domain.ts";
 
 const exec = promisify(execFile);
 const cliCommand = [

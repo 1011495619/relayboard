@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { listTools, callTool } from "./mcp-client.js";
-import { errorInfo } from "./errors.js";
+import { listTools, callTool } from "./mcp-client.ts";
+import { errorInfo } from "./errors.ts";
 import { readFileSync } from "node:fs";
-import { request } from "./client.js";
-import { commands } from "../server/schemas.js";
-import { version } from "../server/config.js";
+import { request } from "./client.ts";
+import { commands } from "../server/schemas.ts";
+import { version } from "../server/config.ts";
 
 const [mode, name, raw, requestId] = process.argv.slice(2);
 const help = `Relayboard ${version}
@@ -66,7 +66,7 @@ async function main() {
         } else options.dataDir = value;
       } else throw Error(`未知启动参数：${flag}。使用 --help 查看用法。`);
     }
-    const { startServer } = await import("../server/start.js");
+    const { startServer } = await import("../server/start.ts");
     await startServer(options);
     return;
   }
@@ -75,7 +75,7 @@ async function main() {
       throw Error(
         "mcp 子命令使用 RELAYBOARD_URL 和 RELAYBOARD_TOKEN 环境变量配置连接。",
       );
-    await import("./mcp.js");
+    await import("./mcp.ts");
     return;
   }
   let result: unknown;

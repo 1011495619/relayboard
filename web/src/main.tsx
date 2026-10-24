@@ -111,7 +111,7 @@ import {
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import type { QueryInput } from "../../server/schemas.js";
+import type { QueryInput } from "../../server/schemas.ts";
 import type { LucideIcon } from "lucide-react";
 import type {
   Project,
@@ -143,7 +143,7 @@ import { AttentionView } from "./components/attention-view";
 import { RequestResolution } from "./components/request-resolution";
 import { ExecutionGuide } from "./components/execution-guide";
 import { ExecutionEditor } from "./components/execution-editor";
-import type { ExecutionPlan } from "../../server/types.js";
+import type { ExecutionPlan } from "../../server/types.ts";
 import "./style.css";
 class ApiError extends Error {
   code?: string;

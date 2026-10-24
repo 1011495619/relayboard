@@ -4,10 +4,10 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { Store } from "../server/store.js";
-import { Service } from "../server/domain.js";
-import type { CommandInput } from "../server/schemas.js";
-import type { WorkGuide, Task } from "../server/types.js";
+import { Store } from "../server/store.ts";
+import { Service } from "../server/domain.ts";
+import type { CommandInput } from "../server/schemas.ts";
+import type { WorkGuide, Task } from "../server/types.ts";
 
 const errorCode = (code: string) => (error: unknown) =>
   error instanceof Error && "code" in error && error.code === code;
@@ -493,7 +493,7 @@ test("dependency revisions are paginated and a coordinator can recover before a 
   const receipts = [];
   let offset: number | null = 0;
   while (offset !== null) {
-    const page: import("../server/types.js").QueryResults["work_dependencies"] =
+    const page: import("../server/types.ts").QueryResults["work_dependencies"] =
       f.s.query("work_dependencies", { task_id: task.id, offset, limit: 10 });
     receipts.push(
       ...page.items.map((d) => ({

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
-import type { WorkspaceEvidence } from "./types.js";
+import type { WorkspaceEvidence } from "./types.ts";
 
 /** Observes files, not whether a reported test command really ran. Never invokes a shell. */
 export function observeWorkspace(

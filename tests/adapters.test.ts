@@ -7,10 +7,10 @@ import piExtension, {
   type PiExtensionApi,
   type Injection,
   type ExtensionContext,
-} from "../integrations/pi-extension.js";
-import { Store } from "../server/store.js";
-import { Service } from "../server/domain.js";
-import { Runner } from "../server/runner.js";
+} from "../integrations/pi-extension.ts";
+import { Store } from "../server/store.ts";
+import { Service } from "../server/domain.ts";
+import { Runner } from "../server/runner.ts";
 
 test("pi lifecycle adapter registers MCP, injects bounded context, reinjects after compaction and cleans resources", async (t) => {
   const originalFetch = globalThis.fetch,

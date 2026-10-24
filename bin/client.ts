@@ -1,4 +1,4 @@
-import { ClientError } from "./errors.js";
+import { ClientError } from "./errors.ts";
 export const baseUrl = () =>
   (process.env.RELAYBOARD_URL || "http://127.0.0.1:4317")
     .replace(/\/mcp\/?$/, "")

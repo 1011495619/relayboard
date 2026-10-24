@@ -1,13 +1,13 @@
 import test, { type TestContext } from "node:test";
-import type { Task, Run, RelayEvent } from "../server/types.js";
-import type { CommandInput } from "../server/schemas.js";
+import type { Task, Run, RelayEvent } from "../server/types.ts";
+import type { CommandInput } from "../server/schemas.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { Store } from "../server/store.js";
-import { Service } from "../server/domain.js";
+import { Store } from "../server/store.ts";
+import { Service } from "../server/domain.ts";
 
 function fixture(
   t: TestContext,

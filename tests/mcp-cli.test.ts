@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { AddressInfo } from "node:net";
-import { createApp } from "../server/app.js";
-import { unwrapToolResult } from "../bin/mcp-client.js";
+import { createApp } from "../server/app.ts";
+import { unwrapToolResult } from "../bin/mcp-client.ts";
 
 const cli = fileURLToPath(new URL("../lib/bin/relayboard.js", import.meta.url));
 function execute(args: string[], env: NodeJS.ProcessEnv, input = "") {

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Service } from "../server/domain.js";
-import { Store } from "../server/store.js";
-import type { Project, Task } from "../server/types.js";
+import { Service } from "../server/domain.ts";
+import { Store } from "../server/store.ts";
+import type { Project, Task } from "../server/types.ts";
 
 // Compile-time contracts: defaults stay optional, known operations reject invalid inputs.
 function typedContracts(service: Service) {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import type { Service } from "./domain.js";
-import type { Task, Decision, WorkGuide, WorkflowState } from "./types.js";
-import { observeWorkspace } from "./workspace.js";
+import type { Service } from "./domain.ts";
+import type { Task, Decision, WorkGuide, WorkflowState } from "./types.ts";
+import { observeWorkspace } from "./workspace.ts";
 
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");

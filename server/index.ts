@@ -1,5 +1,5 @@
-import { errorInfo } from "../bin/errors.js";
-import { startServer } from "./start.js";
+import { errorInfo } from "../bin/errors.ts";
+import { startServer } from "./start.ts";
 
 try {
   await startServer({ open: process.env.RELAYBOARD_OPEN === "1" });

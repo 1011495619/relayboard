@@ -1,10 +1,10 @@
 import type { AddressInfo } from "node:net";
-import { errorInfo } from "../bin/errors.js";
+import { errorInfo } from "../bin/errors.ts";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { createApp } from "./app.js";
-import { defaultDataDir, packageRoot } from "./config.js";
+import { createApp } from "./app.ts";
+import { defaultDataDir, packageRoot } from "./config.ts";
 
 function openBrowser(url: string) {
   const [command, args] =

@@ -13,8 +13,8 @@ import type {
   Artifact,
   Verification,
   Message,
-} from "../../server/types.js";
-import type { CommandInput, Runtime } from "../../server/schemas.js";
+} from "../../server/types.ts";
+import type { CommandInput, Runtime } from "../../server/schemas.ts";
 export type {
   Project,
   Task,

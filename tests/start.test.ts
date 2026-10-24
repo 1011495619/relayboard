@@ -8,8 +8,8 @@ import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { defaultDataDir, version } from "../server/config.js";
-import { startServer } from "../server/start.js";
+import { defaultDataDir, version } from "../server/config.ts";
+import { startServer } from "../server/start.ts";
 
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../lib/bin/relayboard.js", import.meta.url));

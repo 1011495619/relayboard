@@ -4,8 +4,8 @@
  * This process has no model turn, transcript summary or unsaved-progress capture.
  */
 import { readFileSync } from "node:fs";
-import { errorInfo } from "../bin/errors.js";
-import { request } from "../bin/client.js";
+import { errorInfo } from "../bin/errors.ts";
+import { request } from "../bin/client.ts";
 try {
   const raw = readFileSync(0, "utf8");
   if (raw.trim()) JSON.parse(raw); // Validate hook input, without loading the conversation transcript.

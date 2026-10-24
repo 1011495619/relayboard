@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { WorkGuide, ExecutionPlan } from "../../../server/types.js";
+import type { WorkGuide, ExecutionPlan } from "../../../server/types.ts";
 import type { Task, Run, Message } from "../types";
 import { RequestResolution } from "./request-resolution";
 

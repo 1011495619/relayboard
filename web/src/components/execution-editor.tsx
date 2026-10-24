@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import type { ExecutionPlan } from "../../../server/types.js";
+import type { ExecutionPlan } from "../../../server/types.ts";
 
 const lines = (value: string) =>
   value

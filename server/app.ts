@@ -5,11 +5,11 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z, ZodError } from "zod";
-import { Store } from "./store.js";
-import { Service, AppError } from "./domain.js";
-import { createMcp } from "./mcp.js";
-import { Runner, createWorktree, type RunnerProfile } from "./runner.js";
-import { Scheduler } from "./scheduler.js";
+import { Store } from "./store.ts";
+import { Service, AppError } from "./domain.ts";
+import { createMcp } from "./mcp.ts";
+import { Runner, createWorktree, type RunnerProfile } from "./runner.ts";
+import { Scheduler } from "./scheduler.ts";
 import {
   packageRoot,
   runtimeRoot,
@@ -17,9 +17,9 @@ import {
   runtimeNodeArgs,
   defaultDataDir,
   version,
-} from "./config.js";
+} from "./config.ts";
 
-import { errorInfo } from "../bin/errors.js";
+import { errorInfo } from "../bin/errors.ts";
 const root = packageRoot;
 const secureEqual = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));

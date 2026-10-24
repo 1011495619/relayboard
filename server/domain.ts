@@ -15,9 +15,9 @@ import {
   artifactRevision,
   evidenceStale,
   pendingRequests,
-} from "./workflow.js";
-import { observeWorkspace } from "./workspace.js";
-import { commands, queries } from "./schemas.js";
+} from "./workflow.ts";
+import { observeWorkspace } from "./workspace.ts";
+import { commands, queries } from "./schemas.ts";
 import type {
   CommandName,
   CommandArgs,
@@ -26,8 +26,8 @@ import type {
   QueryArgs,
   QueryInput,
   TaskFields,
-} from "./schemas.js";
-import type { Store } from "./store.js";
+} from "./schemas.ts";
+import type { Store } from "./store.ts";
 import type {
   RecordKind,
   RecordMap,
@@ -44,7 +44,7 @@ import type {
   Agent,
   SplitProposal,
   ScopeProposal,
-} from "./types.js";
+} from "./types.ts";
 
 const ACTIVE = new Set(["doing", "blocked", "review", "reconcile"]);
 const now = () => new Date().toISOString();

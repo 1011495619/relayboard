@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ClientError, errorInfo } from "../bin/errors.js";
+import { ClientError, errorInfo } from "../bin/errors.ts";
 export interface ExtensionContext {
   ui?: { notify?: (text: string, level: "warning") => void };
 }

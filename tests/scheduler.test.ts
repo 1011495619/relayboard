@@ -1,8 +1,8 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { Store } from "../server/store.js";
-import { Service } from "../server/domain.js";
-import { Scheduler } from "../server/scheduler.js";
+import { Store } from "../server/store.ts";
+import { Service } from "../server/domain.ts";
+import { Scheduler } from "../server/scheduler.ts";
 
 function fixture(t: TestContext) {
   const store = new Store(),

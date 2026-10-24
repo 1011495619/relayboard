@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { RecordKind, RecordMap, RelayEvent } from "./types.js";
+import type { RecordKind, RecordMap, RelayEvent } from "./types.ts";
 
 export class Store {
   readonly db: DatabaseSync;
