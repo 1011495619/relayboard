@@ -30,7 +30,11 @@ export const taskFields = {
   priority: z.enum(["low", "normal", "high"]).default("normal"),
 };
 const childTask = z.object(taskFields).omit({ parent_id: true }).strict();
-const claimFields = { task_id: id, run_id: id, claim_epoch: version };
+const claimFields = {
+  task_id: id,
+  run_id: id.describe("Your execution session ID: agent_register returns {agent, run}; use run.id, not agent.id."),
+  claim_epoch: version.describe("Current task ownership epoch returned by claim, split or handoff; distinct from task.version."),
+};
 
 export const commands = {
   project_create: {
@@ -66,7 +70,7 @@ export const commands = {
   },
   agent_register: {
     description:
-      "Register an agent session BEFORE dispatching it. Supply parent_run_id for every native child or grandchild. This records identity, not proof that a process is running.",
+      "Register an agent session BEFORE dispatching it. Returns {agent, run}: use run.id for claims, checkpoints and inbox; agent.id is only the reusable logical identity. Supply parent_run_id for every native child or grandchild. Registration is not proof that a process is running.",
     schema: z
       .object({
         project_id: id,
@@ -157,7 +161,7 @@ export const commands = {
   },
   task_claim: {
     description:
-      "Atomically recheck readiness, capabilities, ancestry, concurrent budget and occupied scopes, then claim. Use latest expected_version. The returned claim_epoch fences old owners.",
+      "Atomically recheck readiness, capabilities, ancestry, concurrent budget and occupied scopes, then claim. run_id is agent_register result.run.id, never agent.id. Use latest expected_version. Returns the updated task; retain its claim_epoch to fence old owners.",
     schema: z
       .object({ task_id: id, run_id: id, expected_version: version })
       .strict(),
@@ -196,7 +200,7 @@ export const commands = {
   },
   task_split: {
     description:
-      "Atomically turn a task into a coordinator and create executable children. Only its owner or the human may split an assigned task. Existing progress remains on the parent.",
+      "Atomically turn a task into a coordinator and create executable children. Returns {parent, children}; splitting an owned task increments parent.claim_epoch, so replace the old epoch before the next parent checkpoint. Only its owner or the human may split an assigned task. Existing progress remains on the parent.",
     schema: z
       .object({
         task_id: id,
