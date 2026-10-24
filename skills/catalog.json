@@ -1,0 +1,44 @@
+[
+  {
+    "name": "task-continuity",
+    "title": "协作入口",
+    "role": "所有参与者",
+    "description": "加入项目、找回上下文、选择当前角色。",
+    "prompt": "先加入 Relayboard 项目，读取有界上下文，登记当前会话并检查可领取任务。"
+  },
+  {
+    "name": "relay-planning",
+    "title": "规划与分工",
+    "role": "协调者",
+    "description": "拆分可验收任务，协商范围和依赖。",
+    "prompt": "读取项目目标与已有任务，规划可独立领取的子任务，检查写入范围、依赖和验收。"
+  },
+  {
+    "name": "relay-execution",
+    "title": "领取与执行",
+    "role": "执行者",
+    "description": "领取工作、保存检查点、交付证据。",
+    "prompt": "检查 Relayboard 可领取任务，使用自己的 Run 领取一项工作，并持续保存事实检查点。"
+  },
+  {
+    "name": "relay-subagents",
+    "title": "子 agent 协作",
+    "role": "父子执行者",
+    "description": "登记每层身份，派发任务并报告进度。",
+    "prompt": "为每个子 agent 登记独立 Run，分配独立任务、范围与工作区，汇总真实报告。"
+  },
+  {
+    "name": "relay-review",
+    "title": "验收与集成",
+    "role": "独立验收者",
+    "description": "核对交付证据，验收子任务和集成结果。",
+    "prompt": "独立核验 Relayboard 待验收任务，检查实际成果与验收标准，记录通过或退回依据。"
+  },
+  {
+    "name": "relay-handoff",
+    "title": "交接与续接",
+    "role": "交接双方",
+    "description": "停止旧写入，保留现场，让新会话接手。",
+    "prompt": "为 Relayboard 任务保存交接包，核实旧写入者与后代状态，让新会话核验现场后继续。"
+  }
+]

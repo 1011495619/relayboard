@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.relayboard/
+playwright-report/
+test-results/
+*.log
+.playwright-cli/
+output/playwright/
+
+lib/
+.DS_Store
+*.tsbuildinfo
