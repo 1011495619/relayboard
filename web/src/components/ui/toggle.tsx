@@ -1,5 +1,5 @@
 import { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
-import { cva } from "class-variance-authority";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 
 const toggleVariants = cva(
@@ -29,7 +29,7 @@ function Toggle({
   variant = "default",
   size = "default",
   ...props
-}) {
+}: TogglePrimitive.Props & VariantProps<typeof toggleVariants>) {
   return (
     <TogglePrimitive
       data-slot="toggle"

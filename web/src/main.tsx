@@ -111,10 +111,66 @@ import {
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import type { QueryInput } from "../../server/schemas.js";
+import type { LucideIcon } from "lucide-react";
+import type {
+  Project,
+  Task,
+  Run,
+  Snapshot,
+  Eligible,
+  ContextPacket,
+  Skill,
+  SkillSource,
+  Integration,
+  RuntimeInfo,
+  ModalState,
+  ModalKind,
+  SetModal,
+  Notify,
+  Act,
+  OpenTask,
+  CommandResults,
+  Command,
+  HandleError,
+  ChildDraft,
+  Artifact,
+  Verification,
+  TaskStatus,
+  QueryResults,
+} from "./types";
 import "./style.css";
+class ApiError extends Error {
+  code?: string;
+  details?: unknown;
+}
+const errorInfo = (error: unknown): ApiError =>
+  error instanceof Error ? error : new Error(String(error));
+type CommonProps = { children?: React.ReactNode };
+type ViewProps = { data: Snapshot; openTask: OpenTask };
+type Api = typeof api;
+const required = <T,>(value: T | null | undefined, message: string): T => {
+  if (value == null) throw new Error(message);
+  return value;
+};
+type ApiResult<P extends string> = P extends "/skills"
+  ? Skill[]
+  : P extends `/skills/${string}`
+    ? SkillSource
+    : P extends "/integration"
+      ? Integration
+      : P extends "/runtimes"
+        ? RuntimeInfo[]
+        : P extends `/runner/logs/${string}`
+          ? { text: string; truncated: boolean }
+          : P extends "/export"
+            ? { path: string }
+            : P extends "/worktree"
+              ? { workdir: string; branch: string }
+              : unknown;
 
 const API = "/api";
-const statusNames = {
+const statusNames: Record<string, string> = {
   pending: "待领取",
   doing: "进行中",
   blocked: "受阻",
@@ -122,14 +178,14 @@ const statusNames = {
   review: "待验收",
   done: "已完成",
 };
-const runtimeNames = {
+const runtimeNames: Record<string, string> = {
   codex: "Codex",
   claude: "Claude Code",
   pi: "pi agent",
   other: "其他工具",
   human: "人工",
 };
-const eventNames = {
+const eventNames: Record<string, string> = {
   "project.created": "创建项目",
   "project.updated": "更新目标",
   "task.created": "创建任务",
@@ -157,7 +213,7 @@ const eventNames = {
   "runner.unknown": "进程待核实",
   "workspace.created": "创建工作区",
 };
-const icons = {
+const icons: Record<string, LucideIcon> = {
   board: LayoutDashboard,
   join: ArrowUpRight,
   agents: Users,
@@ -177,12 +233,12 @@ const navItems = [
   ["skills", "协作 Skills"],
   ["settings", "项目与接入"],
 ];
-const splitLines = (value) =>
+const splitLines = (value: unknown) =>
   String(value || "")
     .split(/[,，\n]/)
     .map((s) => s.trim())
     .filter(Boolean);
-const time = (value) =>
+const time = (value?: string | null) =>
   value
     ? new Intl.DateTimeFormat("zh-CN", {
         month: "2-digit",
@@ -192,9 +248,9 @@ const time = (value) =>
         hour12: false,
       }).format(new Date(value))
     : "尚无记录";
-const relative = (value) => {
+const relative = (value?: string | null) => {
   if (!value) return "尚无进度";
-  const seconds = Math.max(0, (Date.now() - new Date(value)) / 1000);
+  const seconds = Math.max(0, (Date.now() - new Date(value).getTime()) / 1000);
   return seconds < 60
     ? "刚刚"
     : seconds < 3600
@@ -202,7 +258,11 @@ const relative = (value) => {
       : `${Math.floor(seconds / 3600)} 小时前`;
 };
 
-async function api(path, body, method = "POST") {
+async function api<P extends string>(
+  path: P,
+  body?: unknown,
+  method = "POST",
+): Promise<ApiResult<P>> {
   const token = localStorage.getItem("relayboard-token");
   const res = await fetch(`${API}${path}`, {
     method,
@@ -214,18 +274,29 @@ async function api(path, body, method = "POST") {
   });
   const value = await res.json();
   if (!res.ok) {
-    const e = new Error(value.error?.message || `HTTP ${res.status}`);
+    const e = new ApiError(value.error?.message || `HTTP ${res.status}`);
     e.code = value.error?.code;
     e.details = value.error?.details;
     throw e;
   }
   return value.result ?? value;
 }
-const query = (name, args = {}) => api("/query", { query: name, args });
-const command = (operation, args) =>
-  api("/command", { operation, args, request_id: crypto.randomUUID() });
 
-function Checkbox({ onChange, ...props }) {
+const query = <K extends keyof QueryResults>(name: K, args?: QueryInput<K>) =>
+  api("/query", { query: name, args }) as Promise<QueryResults[K]>;
+const command: Command = (operation, args) =>
+  api("/command", {
+    operation,
+    args,
+    request_id: crypto.randomUUID(),
+  }) as Promise<CommandResults[typeof operation]>;
+
+function Checkbox({
+  onChange,
+  ...props
+}: Omit<React.ComponentProps<typeof UiCheckbox>, "onChange"> & {
+  onChange?: (event: { target: { checked: boolean } }) => void;
+}) {
   return (
     <UiCheckbox
       {...props}
@@ -233,7 +304,11 @@ function Checkbox({ onChange, ...props }) {
     />
   );
 }
-function ResponsiveSidebar({ mobileNav, close, children }) {
+function ResponsiveSidebar({
+  mobileNav,
+  close,
+  children,
+}: CommonProps & { mobileNav: boolean; close: () => void }) {
   const mobile = useIsMobile();
   return mobile ? (
     <Sheet open={mobileNav} onOpenChange={(open) => !open && close()}>
@@ -252,7 +327,13 @@ function ResponsiveSidebar({ mobileNav, close, children }) {
     </Sidebar>
   );
 }
-function Avatar({ run, small = false }) {
+function Avatar({
+  run,
+  small = false,
+}: {
+  run?: Pick<Run, "runtime" | "name">;
+  small?: boolean;
+}) {
   return (
     <UiAvatar
       className={cn("agent-avatar", small && "size-5")}
@@ -272,7 +353,7 @@ function Avatar({ run, small = false }) {
     </UiAvatar>
   );
 }
-function Badge({ status }) {
+function Badge({ status }: { status: TaskStatus }) {
   return (
     <UiBadge
       variant="outline"
@@ -283,7 +364,16 @@ function Badge({ status }) {
     </UiBadge>
   );
 }
-function Empty({ icon: Icon = Layers3, title, children, action }) {
+function Empty({
+  icon: Icon = Layers3,
+  title,
+  children,
+  action,
+}: CommonProps & {
+  icon?: LucideIcon;
+  title: string;
+  action?: React.ReactNode;
+}) {
   return (
     <UiEmpty className="workspace-empty">
       <EmptyHeader>
@@ -304,6 +394,10 @@ function Button({
   className,
   type = "button",
   ...props
+}: Omit<React.ComponentProps<typeof UiButton>, "variant"> & {
+  icon?: LucideIcon;
+  variant?:
+    React.ComponentProps<typeof UiButton>["variant"] | "primary" | "danger";
 }) {
   return (
     <UiButton
@@ -323,9 +417,16 @@ function Button({
     </UiButton>
   );
 }
-function Field({ label, hint, children }) {
+function Field({
+  label,
+  hint,
+  children,
+}: CommonProps & { label: React.ReactNode; hint?: React.ReactNode }) {
   const id = React.useId();
-  const child = React.isValidElement(children)
+  const child = React.isValidElement<{
+    id?: string;
+    "aria-describedby"?: string;
+  }>(children)
     ? React.cloneElement(children, {
         id: children.props.id || id,
         ...(hint ? { "aria-describedby": `${id}-hint` } : {}),
@@ -348,6 +449,15 @@ function Text({
   multiline,
   hint,
   ...props
+}: Omit<
+  React.InputHTMLAttributes<HTMLInputElement> &
+    React.TextareaHTMLAttributes<HTMLTextAreaElement>,
+  "value"
+> & {
+  label: string;
+  value?: string | number;
+  multiline?: boolean;
+  hint?: string;
 }) {
   return (
     <Field label={label} hint={hint}>
@@ -374,15 +484,15 @@ function Text({
 }
 
 function App() {
-  const [projects, setProjects] = useState([]),
+  const [projects, setProjects] = useState<Project[]>([]),
     [projectId, setProjectId] = useState(
       localStorage.getItem("relayboard-project") || "",
     ),
-    [data, setData] = useState(null);
+    [data, setData] = useState<Snapshot | null>(null);
   const [view, setView] = useState("board"),
     [runId, setRunId] = useState(localStorage.getItem("relayboard-run") || ""),
-    [selectedTask, setSelectedTask] = useState(null);
-  const [modal, setModal] = useState(null),
+    [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const [modal, setModal] = useState<ModalState | null>(null),
     [connected, setConnected] = useState(false),
     [auth, setAuth] = useState(false),
     [loading, setLoading] = useState(true),
@@ -398,7 +508,7 @@ function App() {
   }, [theme]);
   const [search, setSearch] = useState(""),
     [treeView, setTreeView] = useState(false),
-    [eligible, setEligible] = useState([]),
+    [eligible, setEligible] = useState<Eligible[]>([]),
     [filter, setFilter] = useState("all");
   const project = data?.project,
     runs = data?.runs || [],
@@ -406,7 +516,7 @@ function App() {
     currentRun = runs.find((r) => r.id === runId),
     task = tasks.find((t) => t.id === selectedTask);
   const notify = useCallback(
-    (message, error = false) =>
+    (message: string, error = false) =>
       toastManager.add({
         title: message,
         type: error ? "error" : "success",
@@ -415,7 +525,8 @@ function App() {
     [],
   );
   const handleError = useCallback(
-    (error) => {
+    (input: unknown) => {
+      const error = errorInfo(input);
       if (error.code === "AUTH_REQUIRED") setAuth(true);
       else
         notify(
@@ -489,7 +600,7 @@ function App() {
     const events = new EventSource(
       `${API}/stream?project_id=${encodeURIComponent(projectId)}`,
     );
-    let timer;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     events.addEventListener("update", () => {
       clearTimeout(timer);
       timer = setTimeout(refresh, 120);
@@ -511,20 +622,20 @@ function App() {
     else setEligible([]);
   }, [data, runId]);
 
-  const mutate = async (op, args, message) => {
+  const mutate: Command = async (op, args, message) => {
     const result = await command(op, args);
     await refresh();
     if (message) notify(message);
     return result;
   };
-  const act = async (fn) => {
+  const act: Act = async (fn) => {
     try {
       await fn();
     } catch (e) {
       handleError(e);
     }
   };
-  const claim = (t) =>
+  const claim = (t: Task) =>
     act(async () => {
       if (!currentRun) return setModal({ kind: "agent" });
       await mutate(
@@ -533,8 +644,10 @@ function App() {
         "任务已领取，开始前请核对工作范围",
       );
     });
-  const openTask = (t) => setSelectedTask(t.id);
-  const matches = (t) =>
+  const openTask: OpenTask = (t) => {
+    if (t) setSelectedTask(t.id);
+  };
+  const matches = (t: Task) =>
     (!search ||
       `${t.title} ${t.short_id} ${t.scopes.join(" ")}`
         .toLowerCase()
@@ -548,11 +661,11 @@ function App() {
       .length || 0;
   const leaves = tasks.filter((t) => t.mode === "execute"),
     done = leaves.filter((t) => t.status === "done").length;
-  const context = async (t) => {
+  const context = async (t: Task) => {
     const packet = await query("context", { task_id: t.id, max_chars: 24000 });
     setModal({ kind: "context", packet, task: t });
   };
-  const launch = async (run, t) => {
+  const launch = async (run: Run, t: Task) => {
     await api("/runner/start", { run_id: run.id, task_id: t.id });
     await refresh();
     notify(`${runtimeNames[run.runtime]} 已启动，任务结果以检查点和验证为准`);
@@ -627,7 +740,7 @@ function App() {
             e.preventDefault();
             localStorage.setItem(
               "relayboard-token",
-              new FormData(e.target).get("token"),
+              String(new FormData(e.currentTarget).get("token") || ""),
             );
             refresh();
           }}
@@ -978,7 +1091,7 @@ function App() {
                           { value: "mine", label: "当前执行者" },
                         ]}
                         value={filter}
-                        onValueChange={setFilter}
+                        onValueChange={(value) => setFilter(value || "all")}
                       >
                         <SelectTrigger aria-label="筛选任务">
                           <SelectValue />
@@ -1020,13 +1133,15 @@ function App() {
                     </div>
                   ) : (
                     <div className="board">
-                      {[
-                        ["pending", "待领取", Circle],
-                        ["doing", "进行中", CircleDot],
-                        ["reconcile", "待核验", ArrowLeftRight],
-                        ["review", "待验收", ShieldCheck],
-                        ["done", "已完成", CheckCircle2],
-                      ].map(([status, label, Icon]) => {
+                      {(
+                        [
+                          ["pending", "待领取", Circle],
+                          ["doing", "进行中", CircleDot],
+                          ["reconcile", "待核验", ArrowLeftRight],
+                          ["review", "待验收", ShieldCheck],
+                          ["done", "已完成", CheckCircle2],
+                        ] as const
+                      ).map(([status, label, Icon]) => {
                         const column = tasks.filter(
                           (t) =>
                             matches(t) &&
@@ -1255,7 +1370,7 @@ function App() {
           )}
         </div>
       </main>
-      {task && (
+      {task && data && (
         <TaskDrawer
           task={task}
           data={data}
@@ -1291,7 +1406,17 @@ function App() {
   );
 }
 
-function TaskCard({ task: t, tasks, runs, onClick }) {
+function TaskCard({
+  task: t,
+  tasks,
+  runs,
+  onClick,
+}: {
+  task: Task;
+  tasks: Task[];
+  runs: Run[];
+  onClick: () => void;
+}) {
   const owner = runs.find((r) => r.id === t.owner_run_id),
     children = tasks.filter((c) => c.parent_id === t.id),
     parent = tasks.find((p) => p.id === t.parent_id),
@@ -1389,7 +1514,21 @@ function TaskCard({ task: t, tasks, runs, onClick }) {
 }
 const Corner = () => <span className="corner-mark">└</span>;
 
-function TaskRow({ task, tasks, runs, open, matches, depth = 0 }) {
+function TaskRow({
+  task,
+  tasks,
+  runs,
+  open,
+  matches,
+  depth = 0,
+}: {
+  task: Task;
+  tasks: Task[];
+  runs: Run[];
+  open: OpenTask;
+  matches: (task: Task) => boolean;
+  depth?: number;
+}) {
   const children = tasks.filter((t) => t.parent_id === task.id),
     owner = runs.find((r) => r.id === task.owner_run_id),
     visible = matches(task);
@@ -1439,16 +1578,28 @@ function AgentView({
   api,
   refresh,
   notify,
+}: {
+  data: Snapshot;
+  setRunId: (id: string) => void;
+  setView: (view: string) => void;
+  setModal: SetModal;
+  act: Act;
+  api: Api;
+  refresh: () => Promise<void>;
+  notify: Notify;
 }) {
   const { runs, tasks, project } = data;
-  const node = (run, depth = 0) => {
+  const node = (run: Run, depth = 0): React.ReactNode => {
     const owned = tasks.filter(
         (t) => t.owner_run_id === run.id && t.status !== "done",
       ),
       children = runs.filter((r) => r.parent_run_id === run.id);
     return (
       <React.Fragment key={run.id}>
-        <div className="agent-node" style={{ "--depth": depth }}>
+        <div
+          className="agent-node"
+          style={{ "--depth": depth } as React.CSSProperties}
+        >
           <div className="agent-identity">
             <Avatar run={run} />
             <div>
@@ -1466,7 +1617,7 @@ function AgentView({
                 ? "托管进程运行中"
                 : run.process?.status === "failed"
                   ? "进程执行失败"
-                  : ["exited", "stopped"].includes(run.process?.status)
+                  : ["exited", "stopped"].includes(run.process?.status || "")
                     ? "托管进程已退出"
                     : run.status === "ended"
                       ? "会话结束"
@@ -1620,7 +1771,7 @@ function AgentView({
   );
 }
 
-function ScopeView({ data, openTask }) {
+function ScopeView({ data, openTask }: ViewProps) {
   const active = data.tasks.filter(
     (t) =>
       t.mode === "execute" &&
@@ -1700,6 +1851,12 @@ function DiscussionView({
   mutate,
   act,
   openTask,
+}: ViewProps & {
+  runId: string;
+  setRunId: (id: string) => void;
+  setModal: SetModal;
+  mutate: Command;
+  act: Act;
 }) {
   const [tab, setTab] = useState("messages");
   const messages = data.messages.filter(
@@ -1935,7 +2092,7 @@ function DiscussionView({
   );
 }
 
-function ActivityView({ data, openTask }) {
+function ActivityView({ data, openTask }: ViewProps) {
   return (
     <div className="timeline">
       {data.events
@@ -1981,9 +2138,15 @@ function ActivityView({ data, openTask }) {
   );
 }
 
-function SkillsView({ notify, handleError }) {
-  const [skills, setSkills] = useState(null),
-    [selected, setSelected] = useState(null),
+function SkillsView({
+  notify,
+  handleError,
+}: {
+  notify: Notify;
+  handleError: HandleError;
+}) {
+  const [skills, setSkills] = useState<Skill[] | null>(null),
+    [selected, setSelected] = useState<SkillSource | null>(null),
     [skillOpen, setSkillOpen] = useState(false),
     [error, setError] = useState("");
   useEffect(() => {
@@ -1991,7 +2154,7 @@ function SkillsView({ notify, handleError }) {
       .then(setSkills)
       .catch((e) => setError(e.message));
   }, []);
-  const copy = async (text) => {
+  const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
       notify("已复制");
@@ -1999,7 +2162,7 @@ function SkillsView({ notify, handleError }) {
       handleError(e);
     }
   };
-  const inspect = async (skill) => {
+  const inspect = async (skill: Skill) => {
     try {
       setSelected(await api(`/skills/${skill.name}`, null, "GET"));
       setSkillOpen(true);
@@ -2086,7 +2249,7 @@ function SkillsView({ notify, handleError }) {
             <Button
               icon={Copy}
               onClick={() =>
-                copy(skills?.find((s) => s.name === selected.name)?.path || "")
+                copy(skills?.find((s) => s.name === selected?.name)?.path || "")
               }
             >
               复制文件路径
@@ -2094,7 +2257,7 @@ function SkillsView({ notify, handleError }) {
             <Button
               variant="primary"
               icon={Copy}
-              onClick={() => copy(selected.content)}
+              onClick={() => copy(selected?.content || "")}
             >
               复制完整 Skill
             </Button>
@@ -2105,9 +2268,19 @@ function SkillsView({ notify, handleError }) {
   );
 }
 
-function SettingsView({ project, setModal, act, notify }) {
-  const [integration, setIntegration] = useState(null),
-    [runtimes, setRuntimes] = useState([]),
+function SettingsView({
+  project,
+  setModal,
+  act,
+  notify,
+}: {
+  project: Project;
+  setModal: SetModal;
+  act: Act;
+  notify: Notify;
+}) {
+  const [integration, setIntegration] = useState<Integration | null>(null),
+    [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]),
     [tab, setTab] = useState("http");
   useEffect(() => {
     api("/integration", null, "GET")
@@ -2215,7 +2388,7 @@ function SettingsView({ project, setModal, act, notify }) {
             disabled={!snippet}
             onClick={() =>
               act(async () => {
-                await navigator.clipboard.writeText(snippet);
+                await navigator.clipboard.writeText(snippet || "");
                 notify("接入配置已复制");
               })
             }
@@ -2264,6 +2437,16 @@ function TaskDrawer({
   context,
   launch,
   openTask,
+}: ViewProps & {
+  task: Task;
+  currentRun?: Run;
+  close: () => void;
+  setModal: SetModal;
+  claim: (task: Task) => Promise<void>;
+  mutate: Command;
+  act: Act;
+  context: (task: Task) => Promise<void>;
+  launch: (run: Run, task: Task) => Promise<void>;
 }) {
   const owner = data.runs.find((r) => r.id === t.owner_run_id),
     children = data.tasks.filter((c) => c.parent_id === t.id),
@@ -2702,20 +2885,35 @@ function Modal({
   setRunId,
   setModal,
   refresh,
+}: {
+  modal: ModalState;
+  close: () => void;
+  project?: Project;
+  data: Snapshot | null;
+  currentRun?: Run;
+  mutate: Command;
+  notify: Notify;
+  handleError: HandleError;
+  setProjectId: (id: string) => void;
+  setRunId: (id: string) => void;
+  setModal: SetModal;
+  refresh: () => Promise<void>;
 }) {
-  const { kind, task } = modal,
-    runs = data?.runs || [],
+  const { kind } = modal;
+  const task = modal.task!;
+  const runs = data?.runs || [],
     tasks = data?.tasks || [];
+
   const [busy, setBusy] = useState(false),
     [formError, setFormError] = useState(""),
-    [children, setChildren] = useState([
+    [children, setChildren] = useState<ChildDraft[]>([
       { title: "", scope: "", readOnly: false },
       { title: "", scope: "", readOnly: false },
     ]);
-  const [artifacts, setArtifacts] = useState([
+  const [artifacts, setArtifacts] = useState<Artifact[]>([
       { path: "", kind: "file", note: "" },
     ]),
-    [verifications, setVerifications] = useState([
+    [verifications, setVerifications] = useState<Verification[]>([
       { command: "", result: "", passed: true },
     ]),
     [logs, setLogs] = useState("读取运行日志…");
@@ -2762,14 +2960,24 @@ function Modal({
       clearInterval(timer);
     };
   }, [kind]);
-  const submit = async (event) => {
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     setFormError("");
-    const f = new FormData(event.target),
-      value = (key) => String(f.get(key) || ""),
-      optionalActor = currentRun ? { actor_run_id: currentRun.id } : {};
+    const f = new FormData(event.currentTarget),
+      value = (key: string) => String(f.get(key) || ""),
+      optionalActor = currentRun
+        ? { actor_run_id: required(currentRun, "请先选择执行会话").id }
+        : {};
+    const choice = <const T extends readonly string[]>(
+      key: string,
+      choices: T,
+    ): T[number] => {
+      const selected = value(key);
+      if (!choices.includes(selected)) throw new Error(`请选择有效的 ${key}`);
+      return selected;
+    };
     try {
       let result;
       if (kind === "project") {
@@ -2779,7 +2987,7 @@ function Modal({
           constraints: value("constraints"),
           root_path: value("root_path"),
           max_concurrency: Number(value("max_concurrency")),
-          autonomy: value("autonomy"),
+          autonomy: choice("autonomy", ["manual", "collaborative"]),
         };
         if (modal.project)
           result = await mutate(
@@ -2807,7 +3015,7 @@ function Modal({
           scopes: splitLines(value("scopes")),
           resources: splitLines(value("resources")),
           depends_on: f.getAll("depends_on").map(String),
-          priority: value("priority"),
+          priority: choice("priority", ["low", "normal", "high"]),
           required_capabilities: splitLines(value("required_capabilities")),
         };
         if (task)
@@ -2825,7 +3033,7 @@ function Modal({
           result = await mutate(
             "task_create",
             {
-              project_id: project.id,
+              project_id: required(project, "请先选择项目").id,
               ...optionalActor,
               ...fields,
               read_only: f.has("read_only"),
@@ -2838,9 +3046,15 @@ function Modal({
         result = await mutate(
           "agent_register",
           {
-            project_id: project.id,
+            project_id: required(project, "请先选择项目").id,
             name: value("name"),
-            runtime: value("runtime"),
+            runtime: choice("runtime", [
+              "codex",
+              "claude",
+              "pi",
+              "other",
+              "human",
+            ]),
             parent_run_id: value("parent_run_id") || undefined,
             workdir: value("workdir"),
             branch: value("branch"),
@@ -2856,7 +3070,7 @@ function Modal({
           "task_checkpoint",
           {
             task_id: task.id,
-            run_id: currentRun.id,
+            run_id: required(currentRun, "请先选择执行会话").id,
             claim_epoch: task.claim_epoch,
             summary: value("summary"),
             next_step: value("next_step"),
@@ -2887,7 +3101,7 @@ function Modal({
           {
             ...args,
             ...(modal.proposal
-              ? { author_run_id: currentRun.id }
+              ? { author_run_id: required(currentRun, "请先选择执行会话").id }
               : optionalActor),
           },
           modal.proposal
@@ -2900,10 +3114,12 @@ function Modal({
           {
             task_id: task.id,
             expected_version: task.version,
-            ...(currentRun ? { from_run_id: currentRun.id } : {}),
+            ...(currentRun
+              ? { from_run_id: required(currentRun, "请先选择执行会话").id }
+              : {}),
             to_run_id: value("to_run_id"),
             summary: value("summary"),
-            descendants: value("descendants"),
+            descendants: choice("descendants", ["continue", "require_stopped"]),
             confirmed_stop: f.has("confirmed_stop"),
           },
           "执行权已转移，接手者需要先核验现场",
@@ -2913,7 +3129,7 @@ function Modal({
           "task_reconcile",
           {
             task_id: task.id,
-            run_id: currentRun.id,
+            run_id: required(currentRun, "请先选择执行会话").id,
             claim_epoch: task.claim_epoch,
             observed: value("observed"),
             next_step: value("next_step"),
@@ -2927,7 +3143,7 @@ function Modal({
             task_id: task.id,
             expected_version: task.version,
             reviewer_run_id: currentRun?.id,
-            accepted: modal.accepted,
+            accepted: modal.accepted ?? false,
             note: value("note"),
           },
           modal.accepted
@@ -2939,7 +3155,7 @@ function Modal({
           "scope_request",
           {
             task_id: task.id,
-            run_id: currentRun.id,
+            run_id: required(currentRun, "请先选择执行会话").id,
             claim_epoch: task.claim_epoch,
             scopes: splitLines(value("scopes")),
             resources: splitLines(value("resources")),
@@ -2952,7 +3168,7 @@ function Modal({
           "task_release",
           {
             task_id: task.id,
-            run_id: currentRun.id,
+            run_id: required(currentRun, "请先选择执行会话").id,
             claim_epoch: task.claim_epoch,
             note: value("note"),
             confirmed_stop: f.has("confirmed_stop"),
@@ -2963,11 +3179,17 @@ function Modal({
         result = await mutate(
           "message_send",
           {
-            project_id: project.id,
+            project_id: required(project, "请先选择项目").id,
             from_run_id: currentRun?.id,
             to_run_id: value("to_run_id") || undefined,
             task_id: value("task_id") || undefined,
-            kind: value("message_kind"),
+            kind: choice("message_kind", [
+              "discussion",
+              "request",
+              "blocker",
+              "delivery",
+              "review",
+            ]),
             body: value("body"),
           },
           "消息已保存并投递到收件箱",
@@ -2976,7 +3198,7 @@ function Modal({
         result = await mutate(
           "decision_record",
           {
-            project_id: project.id,
+            project_id: required(project, "请先选择项目").id,
             ...optionalActor,
             title: value("title"),
             body: value("body"),
@@ -3017,7 +3239,7 @@ function Modal({
               }
             : {
                 run_id: modal.run.id,
-                status: value("status"),
+                status: choice("status", ["ended", "unknown"]),
                 note: value("note"),
               },
           "会话状态已更新，任务归属仍然保留",
@@ -3035,7 +3257,7 @@ function Modal({
         );
       } else if (kind === "worktree") {
         result = await api("/worktree", {
-          project_id: project.id,
+          project_id: required(project, "请先选择项目").id,
           name: value("name"),
           base_ref: value("base_ref") || "HEAD",
         });
@@ -3050,15 +3272,15 @@ function Modal({
       }
       close();
     } catch (e) {
-      setFormError(e.message);
-      if (e.code === "AUTH_REQUIRED") handleError(e);
+      setFormError(errorInfo(e).message);
+      if (errorInfo(e).code === "AUTH_REQUIRED") handleError(e);
     } finally {
       setBusy(false);
     }
   };
-  const updateChild = (i, fields) =>
+  const updateChild = (i: number, fields: Partial<ChildDraft>) =>
     setChildren(children.map((c, n) => (n === i ? { ...c, ...fields } : c)));
-  const projectFields = modal.project || {};
+  const projectFields: Partial<Project> = modal.project || {};
   const readOnly = ["context", "logs"].includes(kind);
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>
@@ -3416,7 +3638,12 @@ function Modal({
                         onChange={(e) =>
                           setArtifacts(
                             artifacts.map((x, n) =>
-                              n === i ? { ...x, kind: e.target.value } : x,
+                              n === i
+                                ? {
+                                    ...x,
+                                    kind: e.target.value as Artifact["kind"],
+                                  }
+                                : x,
                             ),
                           )
                         }
@@ -3922,7 +4149,7 @@ function Modal({
                     required
                   />
                   <p className="muted">
-                    源代码目录：<code>{project.root_path || "未设置"}</code>
+                    源代码目录：<code>{project?.root_path || "未设置"}</code>
                   </p>
                 </>
               )}
@@ -3965,7 +4192,7 @@ function Modal({
   );
 }
 
-createRoot(document.getElementById("root")).render(
+createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
     <Toaster>
       <App />

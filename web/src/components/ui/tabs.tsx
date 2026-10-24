@@ -1,8 +1,12 @@
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs";
-import { cva } from "class-variance-authority";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 
-function Tabs({ className, orientation = "horizontal", ...props }) {
+function Tabs({
+  className,
+  orientation = "horizontal",
+  ...props
+}: TabsPrimitive.Root.Props) {
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
@@ -31,7 +35,11 @@ const tabsListVariants = cva(
   },
 );
 
-function TabsList({ className, variant = "default", ...props }) {
+function TabsList({
+  className,
+  variant = "default",
+  ...props
+}: TabsPrimitive.List.Props & VariantProps<typeof tabsListVariants>) {
   return (
     <TabsPrimitive.List
       data-slot="tabs-list"
@@ -42,7 +50,7 @@ function TabsList({ className, variant = "default", ...props }) {
   );
 }
 
-function TabsTrigger({ className, ...props }) {
+function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
   return (
     <TabsPrimitive.Tab
       data-slot="tabs-trigger"
@@ -58,7 +66,7 @@ function TabsTrigger({ className, ...props }) {
   );
 }
 
-function TabsContent({ className, ...props }) {
+function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   return (
     <TabsPrimitive.Panel
       data-slot="tabs-content"
