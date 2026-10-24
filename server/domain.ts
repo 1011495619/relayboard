@@ -2,15 +2,18 @@ import { randomUUID, createHash } from "node:crypto";
 import { resolve, posix, isAbsolute, dirname, basename } from "node:path";
 import { realpathSync } from "node:fs";
 import { commands, queries } from "./schemas.js";
+import type { CommandName, CommandArgs, QueryName, QueryArgs, TaskFields } from "./schemas.js";
+import type { Store } from "./store.js";
+import type { RecordKind, RecordMap, VersionedRecord, Task, Run, RelayEvent, ScopeConflict, Eligibility, CommandResults, QueryResults, ContextPacket, Project, Agent, SplitProposal, ScopeProposal } from "./types.js";
 
 const ACTIVE = new Set(["doing", "blocked", "review", "reconcile"]);
 const now = () => new Date().toISOString();
-const uid = (prefix) =>
+const uid = (prefix: string) =>
   `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
-const subset = (child, parent) =>
+const subset = (child: string, parent: string) =>
   parent === "." || child === parent || child.startsWith(`${parent}/`);
-export const overlaps = (a, b) => subset(a, b) || subset(b, a);
-const canonical = (p) => {
+export const overlaps = (a: string, b: string) => subset(a, b) || subset(b, a);
+const canonical = (p: string): string => {
   try {
     return realpathSync.native(resolve(p));
   } catch {
@@ -21,20 +24,24 @@ const canonical = (p) => {
       : resolve(canonical(parent), basename(absolute));
   }
 };
-const cap = (s, n = 2000) => String(s || "").slice(0, n);
+const cap = (s: unknown, n = 2000) => String(s || "").slice(0, n);
 
 export class AppError extends Error {
-  constructor(code, message, status = 409, details = undefined) {
+  code: string;
+  status: number;
+  details: unknown;
+  constructor(code: string, message: string, status = 409, details: unknown = undefined) {
     super(message);
     this.code = code;
     this.status = status;
     this.details = details;
   }
 }
-function ensure(ok, code, message, details) {
+function ensure(ok: unknown, code: string, message: string, details?: unknown): asserts ok {
   if (!ok) throw new AppError(code, message, 409, details);
 }
-function scopePath(s) {
+function runIdPresent(id: string | null): id is string { return id !== null; }
+function scopePath(s: string) {
   ensure(
     !s.includes("\\") &&
       !isAbsolute(s) &&
@@ -47,16 +54,18 @@ function scopePath(s) {
 }
 
 export class Service {
-  constructor(store) {
+  readonly store: Store;
+  readonly listeners: Set<(event: RelayEvent) => void>;
+  constructor(store: Store) {
     this.store = store;
     this.listeners = new Set();
   }
-  get(kind, id) {
+  get<K extends RecordKind>(kind: K, id: string): RecordMap[K] {
     const item = this.store.get(kind, id);
     if (!item) throw new AppError("NOT_FOUND", `${kind} ${id} 不存在`, 404);
     return item;
   }
-  sameProject(project, kind, id) {
+  sameProject<K extends RecordKind>(project: string, kind: K, id: string): RecordMap[K] {
     const item = this.get(kind, id);
     ensure(
       (item.project_id || item.id) === project,
@@ -65,7 +74,7 @@ export class Service {
     );
     return item;
   }
-  update(kind, item, fields) {
+  update<K extends RecordKind>(kind: K, item: RecordMap[K], fields: Partial<RecordMap[K]>): RecordMap[K] {
     return this.store.put(kind, {
       ...item,
       ...fields,
@@ -73,7 +82,7 @@ export class Service {
       updated_at: now(),
     });
   }
-  revision(item, version) {
+  revision(item: VersionedRecord, version: number) {
     ensure(
       item.version === version,
       "STALE_VERSION",
@@ -81,7 +90,7 @@ export class Service {
       { current_version: item.version },
     );
   }
-  emit(project, type, fields = {}) {
+  emit(project: string, type: string, fields: Record<string, unknown> = {}) {
     const event = this.store.event({
       id: uid("evt"),
       project_id: project,
@@ -94,16 +103,17 @@ export class Service {
     });
     return event;
   }
-  task(id) {
+  task(id: string) {
     return this.get("task", id);
   }
-  tasks(project) {
+  tasks(project: string) {
     return this.store.list("task", project);
   }
-  run(id) {
+  run(id: string | null) {
+    ensure(runIdPresent(id), "NOT_FOUND", "执行会话不存在");
     return this.get("run", id);
   }
-  actor(task, runId) {
+  actor(task: Task, runId?: string) {
     if (runId) {
       this.sameProject(task.project_id, "run", runId);
       ensure(
@@ -113,7 +123,7 @@ export class Service {
       );
     }
   }
-  currentClaim(task, args, allowReconcile = false) {
+  currentClaim(task: Task, args: { run_id: string; claim_epoch: number }, allowReconcile = false) {
     ensure(
       task.owner_run_id === args.run_id &&
         task.claim_epoch === args.claim_epoch,
@@ -136,7 +146,7 @@ export class Service {
       );
     return run;
   }
-  ancestors(task) {
+  ancestors(task: Task) {
     const result = [];
     let p = task;
     while (p.parent_id) {
@@ -145,7 +155,7 @@ export class Service {
     }
     return result;
   }
-  runDescendants(runId) {
+  runDescendants(runId: string) {
     const root = this.run(runId),
       runs = this.store.list("run", root.project_id),
       ids = new Set([runId]);
@@ -153,14 +163,14 @@ export class Service {
     while (changed) {
       changed = false;
       for (const r of runs)
-        if (ids.has(r.parent_run_id) && !ids.has(r.id)) {
+        if (r.parent_run_id !== null && ids.has(r.parent_run_id) && !ids.has(r.id)) {
           ids.add(r.id);
           changed = true;
         }
     }
     return runs.filter((r) => r.id !== runId && ids.has(r.id));
   }
-  activeDescendants(task) {
+  activeDescendants(task: Task) {
     return this.tasks(task.project_id).filter(
       (t) =>
         t.id !== task.id &&
@@ -168,7 +178,7 @@ export class Service {
         ACTIVE.has(t.status),
     );
   }
-  normalizeTask(fields) {
+  normalizeTask<T extends TaskFields>(fields: T): T {
     const task = {
       ...fields,
       scopes: [...new Set(fields.scopes.map(scopePath))],
@@ -187,7 +197,7 @@ export class Service {
     );
     return task;
   }
-  validateTask(task) {
+  validateTask(task: Task) {
     const project = task.project_id;
     for (const dep of task.depends_on) {
       ensure(dep !== task.id, "DEPENDENCY_CYCLE", "任务不能依赖自身");
@@ -224,7 +234,7 @@ export class Service {
     }
     const graph = new Map(this.tasks(project).map((t) => [t.id, t]));
     graph.set(task.id, task);
-    const visit = (id, stack = new Set(), done = new Set()) => {
+    const visit = (id: string, stack = new Set<string>(), done = new Set<string>()): void => {
       ensure(!stack.has(id), "DEPENDENCY_CYCLE", "依赖关系形成循环");
       if (done.has(id)) return;
       stack.add(id);
@@ -239,10 +249,10 @@ export class Service {
       stack.delete(id);
       done.add(id);
     };
-    const done = new Set();
+    const done = new Set<string>();
     for (const id of graph.keys()) visit(id, new Set(), done);
   }
-  conflicts(task, run, ignoreId = task.id) {
+  conflicts(task: Task, run: Run, ignoreId = task.id): ScopeConflict[] {
     if (task.mode === "coordinator" || task.read_only) return [];
     const result = [];
     for (const other of this.tasks(task.project_id)) {
@@ -280,7 +290,7 @@ export class Service {
     }
     return result;
   }
-  eligibility(task, run) {
+  eligibility(task: Task, run: Run): Eligibility {
     const reasons = [],
       warnings = [];
     if (run.project_id !== task.project_id) reasons.push("执行者属于其他项目");
@@ -345,8 +355,10 @@ export class Service {
       conflicts,
     };
   }
-  execute(op, input = {}, requestId) {
-    const command = commands[op];
+  execute<K extends CommandName>(op: K, input?: unknown, requestId?: string): CommandResults[K];
+  execute(op: string, input?: unknown, requestId?: string): CommandResults[CommandName];
+  execute(op: string, input: unknown = {}, requestId?: string): CommandResults[CommandName] {
+    const command = commands[op as CommandName];
     if (!command) throw new AppError("UNKNOWN_COMMAND", `未知操作 ${op}`, 400);
     const args = command.schema.parse(input);
     const digest = createHash("sha256")
@@ -365,18 +377,22 @@ export class Service {
           return JSON.parse(cached.body);
         }
       }
-      const result = this[op](args);
+      // The schema and handler are selected by the same checked operation key.
+      const handler = this[op as CommandName] as (value: typeof args) => CommandResults[CommandName];
+      const result = handler.call(this, args);
       if (requestId) this.store.saveReceipt(requestId, digest, result);
       return result;
     });
     return result;
   }
-  query(name, input = {}) {
-    const schema = queries[name];
+  query<K extends QueryName>(name: K, input?: unknown): QueryResults[K];
+  query(name: string, input?: unknown): QueryResults[QueryName];
+  query(name: string, input: unknown = {}): QueryResults[QueryName] {
+    const schema = queries[name as QueryName];
     if (!schema) throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
-    const args = schema.parse(input);
-    if (name === "project") return this.get("project", args.project_id);
+    if (name === "project") return this.get("project", queries.project.parse(input).project_id);
     if (name === "decisions") {
+      const args = queries.decisions.parse(input);
       this.get("project", args.project_id);
       const task = args.task_id
         ? this.sameProject(args.project_id, "task", args.task_id)
@@ -409,6 +425,7 @@ export class Service {
         done_count: this.tasks(p.id).filter((t) => t.status === "done").length,
       }));
     if (name === "snapshot") {
+      const args = queries.snapshot.parse(input);
       const project = this.get("project", args.project_id);
       return {
         project,
@@ -430,6 +447,7 @@ export class Service {
       };
     }
     if (name === "task") {
+      const args = queries.task.parse(input);
       const task = this.task(args.task_id);
       return {
         ...task,
@@ -451,6 +469,7 @@ export class Service {
       };
     }
     if (name === "eligible") {
+      const args = queries.eligible.parse(input);
       const run = this.sameProject(args.project_id, "run", args.run_id);
       return this.tasks(args.project_id)
         .filter((t) => t.status !== "done")
@@ -458,10 +477,12 @@ export class Service {
         .sort((a, b) => Number(b.eligible) - Number(a.eligible));
     }
     if (name === "events") {
+      const args = queries.events.parse(input);
       this.get("project", args.project_id);
       return this.store.events(args.project_id, args.after, args.limit);
     }
     if (name === "inbox") {
+      const args = queries.inbox.parse(input);
       const run = this.run(args.run_id);
       return this.store
         .list("message", run.project_id)
@@ -471,9 +492,10 @@ export class Service {
         )
         .slice(-args.limit);
     }
-    if (name === "context") return this.context(args);
+    if (name === "context") return this.context(queries.context.parse(input));
+    throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
   }
-  project_create(args) {
+  project_create(args: CommandArgs<"project_create">): CommandResults["project_create"] {
     const project = {
       ...args,
       id: uid("prj"),
@@ -486,7 +508,7 @@ export class Service {
     this.emit(project.id, "project.created", { summary: project.name });
     return project;
   }
-  project_update(args) {
+  project_update(args: CommandArgs<"project_update">): CommandResults["project_update"] {
     const p = this.get("project", args.project_id);
     this.revision(p, args.expected_version);
     const { project_id, expected_version, ...fields } = args;
@@ -499,42 +521,43 @@ export class Service {
     });
     return result;
   }
-  agent_register(args) {
+  agent_register(args: CommandArgs<"agent_register">): CommandResults["agent_register"] {
     const project = this.get("project", args.project_id);
     let depth = 0,
       delegated = args.delegated_scopes?.map(scopePath) || ["."],
-      parent;
+      parent: Run | undefined;
     if (args.parent_run_id) {
-      parent = this.sameProject(project.id, "run", args.parent_run_id);
+      const parentRun = this.sameProject(project.id, "run", args.parent_run_id);
+      parent = parentRun;
       ensure(
-        parent.status === "active",
+        parentRun.status === "active",
         "PARENT_INACTIVE",
         "父执行会话当前未激活",
       );
-      depth = parent.depth + 1;
+      depth = parentRun.depth + 1;
       ensure(
         depth <= project.max_depth,
         "DEPTH_BUDGET",
         "超过项目子执行者层级预算",
       );
       const assigned = this.tasks(project.id).filter(
-        (t) => t.owner_run_id === parent.id && ACTIVE.has(t.status),
+        (t) => t.owner_run_id === parentRun.id && ACTIVE.has(t.status),
       );
       const envelope = assigned.length
         ? assigned.flatMap((t) => t.scopes)
-        : parent.delegated_scopes;
+        : parentRun.delegated_scopes;
       delegated = args.delegated_scopes?.map(scopePath) || envelope;
       ensure(
         delegated.every(
           (c) =>
             envelope.some((p) => subset(c, p)) &&
-            parent.delegated_scopes.some((p) => subset(c, p)),
+            parentRun.delegated_scopes.some((p) => subset(c, p)),
         ),
         "DELEGATION_SCOPE",
         "子执行者的范围超出父执行者当前的委派范围",
       );
     }
-    let agent;
+    let agent: Agent;
     if (args.agent_id) {
       agent = this.sameProject(project.id, "agent", args.agent_id);
       ensure(
@@ -554,7 +577,7 @@ export class Service {
       };
       this.store.put("agent", agent);
     }
-    const run = {
+    const run: Run = {
       id: uid("run"),
       project_id: project.id,
       agent_id: agent.id,
@@ -582,7 +605,7 @@ export class Service {
     });
     return { agent, run };
   }
-  run_heartbeat(args) {
+  run_heartbeat(args: CommandArgs<"run_heartbeat">): CommandResults["run_heartbeat"] {
     const run = this.run(args.run_id);
     ensure(
       run.status !== "ended",
@@ -596,7 +619,7 @@ export class Service {
       observation_note: args.note,
     });
   }
-  run_end(args) {
+  run_end(args: CommandArgs<"run_end">): CommandResults["run_end"] {
     const run = this.run(args.run_id);
     ensure(
       run.process?.status !== "running",
@@ -620,7 +643,7 @@ export class Service {
       );
     return result;
   }
-  run_process_reconcile(args) {
+  run_process_reconcile(args: CommandArgs<"run_process_reconcile">): CommandResults["run_process_reconcile"] {
     const run = this.run(args.run_id);
     ensure(
       run.process?.status === "unknown",
@@ -644,7 +667,7 @@ export class Service {
     });
     return result;
   }
-  run_dispatch(args) {
+  run_dispatch(args: CommandArgs<"run_dispatch">): CommandResults["run_dispatch"] {
     const run = this.run(args.run_id);
     ensure(
       ["codex", "claude", "pi"].includes(run.runtime) && !!run.workdir,
@@ -672,9 +695,9 @@ export class Service {
     });
     return result;
   }
-  newTask(project, fields) {
+  newTask(project: string, fields: TaskFields): Task {
     const n = this.tasks(project).length + 1;
-    const task = this.normalizeTask({
+    const task = this.normalizeTask<Task>({
       ...fields,
       id: uid("tsk"),
       short_id: `RB-${String(n).padStart(3, "0")}`,
@@ -695,7 +718,7 @@ export class Service {
     this.store.put("task", task);
     return task;
   }
-  task_create(args) {
+  task_create(args: CommandArgs<"task_create">): CommandResults["task_create"] {
     const project = this.get("project", args.project_id);
     ensure(
       !args.actor_run_id || project.autonomy !== "manual",
@@ -717,7 +740,7 @@ export class Service {
     });
     return task;
   }
-  task_update(args) {
+  task_update(args: CommandArgs<"task_update">): CommandResults["task_update"] {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     ensure(
@@ -753,7 +776,7 @@ export class Service {
     });
     return result;
   }
-  task_claim(args) {
+  task_claim(args: CommandArgs<"task_claim">): CommandResults["task_claim"] {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     const run = this.sameProject(task.project_id, "run", args.run_id);
@@ -777,7 +800,7 @@ export class Service {
     });
     return result;
   }
-  task_checkpoint(args) {
+  task_checkpoint(args: CommandArgs<"task_checkpoint">): CommandResults["task_checkpoint"] {
     const task = this.task(args.task_id),
       run = this.currentClaim(task, args);
     ensure(
@@ -785,7 +808,7 @@ export class Service {
       "ALREADY_SUBMITTED",
       "已提交的任务请先退回再继续修改",
     );
-    const merge = (old, added, key) => [
+    const merge = <T, K extends keyof T>(old: T[], added: T[], key: K): T[] => [
       ...new Map([...old, ...added].map((a) => [a[key], a])).values(),
     ];
     const checkpoint = {
@@ -834,7 +857,7 @@ export class Service {
       );
     return result;
   }
-  task_submit(args) {
+  task_submit(args: CommandArgs<"task_submit">): CommandResults["task_submit"] {
     const task = this.task(args.task_id);
     this.currentClaim(task, args);
     ensure(
@@ -865,7 +888,7 @@ export class Service {
     );
     ensure(
       children.every((t) =>
-        task.checkpoint.required_children_at_checkpoint?.some(
+        task.checkpoint?.required_children_at_checkpoint?.some(
           (c) =>
             c.id === t.id && c.status === "done" && c.version === t.version,
         ),
@@ -893,7 +916,7 @@ export class Service {
       );
     return result;
   }
-  task_review(args) {
+  task_review(args: CommandArgs<"task_review">): CommandResults["task_review"] {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     ensure(task.status === "review", "NOT_SUBMITTED", "任务尚未提交验收");
@@ -936,10 +959,10 @@ export class Service {
       { task_id: task.id, run_id: args.reviewer_run_id, summary: args.note },
     );
     if (args.accepted) {
-      const targets = new Set(
+      const targets = new Set<string>(
         this.tasks(task.project_id)
           .filter((t) => t.depends_on.includes(task.id) && t.owner_run_id)
-          .map((t) => t.owner_run_id),
+          .flatMap((t) => t.owner_run_id ? [t.owner_run_id] : []),
       );
       const parent = task.parent_id ? this.task(task.parent_id) : null;
       if (parent?.owner_run_id) targets.add(parent.owner_run_id);
@@ -953,7 +976,7 @@ export class Service {
     }
     return result;
   }
-  task_split(args) {
+  task_split(args: CommandArgs<"task_split">): CommandResults["task_split"] {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     this.actor(task, args.actor_run_id);
@@ -1013,7 +1036,7 @@ export class Service {
     });
     return { parent, children };
   }
-  proposal_create(args) {
+  proposal_create(args: CommandArgs<"proposal_create">): CommandResults["proposal_create"] {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     this.sameProject(task.project_id, "run", args.author_run_id);
@@ -1023,7 +1046,7 @@ export class Service {
       "SPLIT_STATE",
       "此任务当前不适合提出拆分",
     );
-    const proposal = {
+    const proposal: SplitProposal = {
       ...args,
       id: uid("prop"),
       project_id: task.project_id,
@@ -1047,7 +1070,7 @@ export class Service {
       );
     return proposal;
   }
-  proposal_resolve(args) {
+  proposal_resolve(args: CommandArgs<"proposal_resolve">): CommandResults["proposal_resolve"] {
     const proposal = this.get("proposal", args.proposal_id);
     ensure(
       proposal.type === "split" && proposal.status === "pending",
@@ -1076,10 +1099,10 @@ export class Service {
     });
     return { proposal: result, split };
   }
-  scope_request(args) {
+  scope_request(args: CommandArgs<"scope_request">): CommandResults["scope_request"] {
     const task = this.task(args.task_id);
     this.currentClaim(task, args);
-    const proposal = {
+    const proposal: ScopeProposal = {
       ...args,
       scopes: args.scopes.map(scopePath),
       id: uid("prop"),
@@ -1098,7 +1121,7 @@ export class Service {
     });
     return proposal;
   }
-  scope_resolve(args) {
+  scope_resolve(args: CommandArgs<"scope_resolve">): CommandResults["scope_resolve"] {
     const proposal = this.get("proposal", args.proposal_id),
       task = this.task(proposal.task_id);
     ensure(
@@ -1162,7 +1185,7 @@ export class Service {
     });
     return { proposal: result, task: updated };
   }
-  task_handoff(args) {
+  task_handoff(args: CommandArgs<"task_handoff">): CommandResults["task_handoff"] {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     this.actor(task, args.from_run_id);
@@ -1309,7 +1332,7 @@ export class Service {
     });
     return result;
   }
-  task_reconcile(args) {
+  task_reconcile(args: CommandArgs<"task_reconcile">): CommandResults["task_reconcile"] {
     const task = this.task(args.task_id);
     this.currentClaim(task, args, true);
     ensure(
@@ -1346,7 +1369,7 @@ export class Service {
     });
     return result;
   }
-  task_release(args) {
+  task_release(args: CommandArgs<"task_release">): CommandResults["task_release"] {
     const task = this.task(args.task_id),
       run = this.currentClaim(task, args, true);
     ensure(
@@ -1372,7 +1395,7 @@ export class Service {
     });
     return result;
   }
-  systemMessage(project, to, task, body) {
+  systemMessage(project: string, to: string, task: string | undefined, body: string) {
     return this.message_send({
       project_id: project,
       to_run_id: to,
@@ -1382,7 +1405,7 @@ export class Service {
       system: true,
     });
   }
-  message_send(args) {
+  message_send(args: CommandArgs<"message_send"> & { system?: boolean }): CommandResults["message_send"] {
     this.get("project", args.project_id);
     if (args.from_run_id)
       this.sameProject(args.project_id, "run", args.from_run_id);
@@ -1418,7 +1441,7 @@ export class Service {
     });
     return message;
   }
-  message_ack(args) {
+  message_ack(args: CommandArgs<"message_ack">): CommandResults["message_ack"] {
     const message = this.get("message", args.message_id);
     ensure(
       message.to_run_id === args.run_id,
@@ -1429,7 +1452,7 @@ export class Service {
       acknowledged_at: message.acknowledged_at || now(),
     });
   }
-  decision_record(args) {
+  decision_record(args: CommandArgs<"decision_record">): CommandResults["decision_record"] {
     this.get("project", args.project_id);
     if (args.actor_run_id)
       this.sameProject(args.project_id, "run", args.actor_run_id);
@@ -1444,7 +1467,7 @@ export class Service {
     });
     return decision;
   }
-  context(args) {
+  context(args: QueryArgs<"context">): ContextPacket {
     const task = this.task(args.task_id),
       project = this.get("project", task.project_id);
     if (args.run_id) this.sameProject(project.id, "run", args.run_id);
@@ -1460,7 +1483,7 @@ export class Service {
       );
     const decisions = allDecisions.slice(-8),
       omissions = [];
-    const bounded = (value, count) => {
+    const bounded = (value: unknown, count: number) => {
       const text = String(value || "");
       if (text.length > count)
         omissions.push("部分长字段已摘要，请读取完整任务、项目约束或相关决定");

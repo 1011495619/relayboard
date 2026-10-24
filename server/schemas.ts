@@ -361,3 +361,15 @@ export const queries = {
     })
     .strict(),
 };
+
+/** Input types preserve optional defaulted fields; Args are validated/defaulted outputs. */
+export type CommandName = keyof typeof commands;
+export type CommandArgs<K extends CommandName> = z.output<(typeof commands)[K]["schema"]>;
+export type CommandInput<K extends CommandName> = z.input<(typeof commands)[K]["schema"]>;
+export type QueryName = keyof typeof queries;
+export type QueryArgs<K extends QueryName> = z.output<(typeof queries)[K]>;
+export type QueryInput<K extends QueryName> = z.input<(typeof queries)[K]>;
+export type TaskFields = z.output<typeof childTask> & { parent_id?: string | null };
+export type Artifact = z.output<typeof artifact>;
+export type Verification = z.output<typeof verification>;
+export type Runtime = z.output<typeof runtime>;
