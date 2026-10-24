@@ -2297,7 +2297,7 @@ function SettingsView({
         mcpServers: {
           relayboard: {
             command: integration.node,
-            args: [integration.mcp],
+            args: integration.mcp_args || [integration.mcp],
             env: {
               RELAYBOARD_URL: integration.base_url,
               ...(integration.token_required

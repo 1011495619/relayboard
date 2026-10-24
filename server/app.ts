@@ -14,6 +14,7 @@ import {
   packageRoot,
   runtimeRoot,
   runtimeExtension,
+  runtimeNodeArgs,
   defaultDataDir,
   version,
 } from "./config.js";
@@ -183,9 +184,17 @@ export function createApp({
   app.get("/api/integration", (req, res) =>
     res.json({
       result: {
-        base_url: `http://127.0.0.1:${port}`,
+        base_url: `http://127.0.0.1:${req.socket.localPort || port}`,
         cli: join(runtimeRoot, `bin/relayboard.${runtimeExtension}`),
         mcp: join(runtimeRoot, `bin/mcp.${runtimeExtension}`),
+        cli_args: [
+          ...runtimeNodeArgs,
+          join(runtimeRoot, `bin/relayboard.${runtimeExtension}`),
+        ],
+        mcp_args: [
+          ...runtimeNodeArgs,
+          join(runtimeRoot, `bin/mcp.${runtimeExtension}`),
+        ],
         skill: join(root, "skills/task-continuity"),
         node: process.execPath,
         token_required: !!token,

@@ -9,6 +9,10 @@ export const packageRoot = existsSync(join(moduleRoot, "package.json"))
   : resolve(moduleRoot, "..");
 export const runtimeRoot = moduleRoot;
 export const runtimeExtension = import.meta.url.endsWith(".ts") ? "ts" : "js";
+// Resolve the source loader here, independently of the agent work directory.
+// Published JavaScript never resolves this development-only dependency.
+export const runtimeNodeArgs =
+  runtimeExtension === "ts" ? ["--import", import.meta.resolve("tsx")] : [];
 export const version = JSON.parse(
   readFileSync(join(packageRoot, "package.json"), "utf8"),
 ).version as string;

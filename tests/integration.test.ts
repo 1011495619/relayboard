@@ -199,13 +199,26 @@ test("stdio MCP bridge and CLI use the same authenticated HTTP state", async (t)
     { env },
   );
   const project = JSON.parse(stdout);
-  for (const args of [[bridge], [cli, "mcp"]]) {
+  const integration = (
+    await (
+      await fetch(`${f.url}/api/integration`, { headers: f.headers })
+    ).json()
+  ).result;
+  assert.equal(integration.base_url, f.url);
+  const sourceVersion = await exec(
+    integration.node,
+    [...integration.cli_args, "--version"],
+    { env, cwd: f.dir },
+  );
+  assert.match(sourceVersion.stdout.trim(), /^\d+\.\d+\.\d+/);
+  for (const args of [[bridge], [cli, "mcp"], integration.mcp_args]) {
     const client = new Client({ name: "test-stdio", version: "1" });
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
         args,
         env,
+        cwd: f.dir,
         stderr: "pipe",
       }),
     );

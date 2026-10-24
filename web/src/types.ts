@@ -44,6 +44,8 @@ export interface SkillSource extends Omit<Skill, "path"> {
 export interface Integration {
   node: string;
   mcp: string;
+  mcp_args?: string[];
+  cli_args?: string[];
   base_url: string;
   token_required: boolean;
   skill: string;

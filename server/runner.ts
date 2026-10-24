@@ -14,22 +14,22 @@ import {
   statSync,
 } from "node:fs";
 import { resolve, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { runtimeRoot, runtimeExtension, runtimeNodeArgs } from "./config.js";
 import type { ProcessInfo } from "./types.js";
 import { errorInfo } from "../bin/errors.js";
 import { AppError, type Service } from "./domain.js";
 
 const exec = promisify(execFile);
-const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-const cli = fileURLToPath(
-  new URL(`../bin/relayboard.${extension}`, import.meta.url),
-);
 const cliCommand = [
   process.execPath,
-  ...(extension === "ts" ? ["--import", "tsx"] : []),
-  cli,
+  ...runtimeNodeArgs,
+  join(runtimeRoot, `bin/relayboard.${runtimeExtension}`),
 ]
-  .map((value) => JSON.stringify(value))
+  .map((value) =>
+    process.platform === "win32"
+      ? JSON.stringify(value)
+      : `'${value.replaceAll("'", "'\\''")}'`,
+  )
   .join(" ");
 const stamp = () => new Date().toISOString();
 
