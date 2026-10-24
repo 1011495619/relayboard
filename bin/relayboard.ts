@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { listTools, callTool } from "./mcp-client.js";
 import { errorInfo } from "./errors.js";
 import { readFileSync } from "node:fs";
 import { request } from "./client.js";
@@ -10,6 +11,8 @@ const help = `Relayboard ${version}
   relayboard                         启动服务并打开看板
   relayboard start [--port PORT] [--data-dir PATH] [--no-open]
   relayboard mcp                     stdio MCP（连接已启动的共享服务）
+  relayboard tools [tool-name]       通过 MCP 列工具或读取完整输入结构
+  relayboard call <tool> [JSON or -]  通过 MCP 调用工具（支持 relay_ 前缀）
   relayboard query <projects|project|snapshot|task|eligible|inbox|context|events|decisions> [JSON or -]
   relayboard command <operation> [JSON or -] [request-id]
   relayboard context <task-id>
@@ -76,12 +79,18 @@ async function main() {
     return;
   }
   let result: unknown;
-  const args = ["query", "command", "worktree"].includes(mode)
+  const args = ["query", "command", "worktree", "call"].includes(mode)
     ? raw === "-"
       ? JSON.parse(readFileSync(0, "utf8"))
       : JSON.parse(raw || "{}")
     : {};
-  if (mode === "operations")
+  if (mode === "tools") result = await listTools(name);
+  else if (mode === "call") {
+    if (!name) throw Error("call 需要工具名称。使用 tools 查看工具。 ");
+    if (typeof args !== "object" || args === null || Array.isArray(args))
+      throw Error("MCP 参数须为 JSON 对象");
+    result = await callTool(name, args as Record<string, unknown>);
+  } else if (mode === "operations")
     result = Object.fromEntries(
       Object.entries(commands).map(([name, value]) => [
         name,

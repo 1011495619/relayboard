@@ -18,6 +18,21 @@
 
 `mcp` 仅连接共享服务，不会为每个客户端再启动一套看板；标准输出只传 MCP 协议。
 
+终端也可直接使用真实的 HTTP MCP，而无需先配置其他客户端：
+
+```bash
+relayboard tools                         # 精简工具目录
+relayboard tools agent_register          # 只读取一个工具的完整 schema
+relayboard call projects '{}'
+relayboard call context - <<'JSON'
+{"task_id":"TASK_ID","run_id":"YOUR_RUN_ID","max_chars":6000}
+JSON
+```
+
+`tools` / `call` 使用 MCP SDK 的 Streamable HTTP 连接；`query` / `command` 仍提供 REST 入口。工具名接受 `relay_` 前缀或短名称。服务错误和 MCP 校验错误返回非零退出码，保留可读错误；`RELAYBOARD_URL` 可以是服务根地址或以 `/mcp` 结尾的地址。
+
+`agent_register` 返回 `{agent, run}`，领取任务、检查点、收件箱应使用 **`run.id`**。每个子会话都读取自己的值。
+
 以下本地路径均指安装包或 `npm run build` 生成的 `lib/` JavaScript。开发源码使用 `node --import tsx bin/relayboard.ts ...`；安装包用户直接运行 `relayboard`，无需 TypeScript 运行器。
 
 ## Codex
