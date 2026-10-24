@@ -8,18 +8,18 @@
 
 需要 Node.js 24+。安装包已包含构建好的网页，首次运行由 npx 安装运行依赖，启动时自动打开看板。
 
-当前尚未发布到 npm。下载 `relayboard-0.2.0.tgz`，在下载目录运行：
+当前尚未发布到 npm。下载 `relayboard-0.3.0.tgz`，在下载目录运行：
 
 ```bash
-npx --yes --package=./relayboard-0.2.0.tgz relayboard
+npx --yes --package=./relayboard-0.3.0.tgz relayboard
 ```
 
 服务启动后保留终端，按 Ctrl+C 停止。再次运行会识别已有 Relayboard 并打开同一看板。
 
 ```bash
 # 改端口、指定数据目录或关闭自动开浏览器
-npx --yes --package=./relayboard-0.2.0.tgz relayboard --port 4320 --no-open
-npx --yes --package=./relayboard-0.2.0.tgz relayboard --data-dir /absolute/path/to/data
+npx --yes --package=./relayboard-0.3.0.tgz relayboard --port 4320 --no-open
+npx --yes --package=./relayboard-0.3.0.tgz relayboard --data-dir /absolute/path/to/data
 ```
 
 发布到 npm 后，公开安装入口就是以下命令；发布前请使用上面的本地包：
@@ -80,7 +80,7 @@ Claude Code / 支持 MCP 的 pi 使用通用 stdio 配置：
   "mcpServers": {
     "relayboard": {
       "command": "node",
-      "args": ["/absolute/path/to/relayboard/bin/mcp.js"],
+      "args": ["/absolute/path/to/relayboard/lib/bin/mcp.js"],
       "env": { "RELAYBOARD_URL": "http://127.0.0.1:4317" }
     }
   }
@@ -91,7 +91,7 @@ Claude Code / 支持 MCP 的 pi 使用通用 stdio 配置：
 
 ## 协作 Skill
 
-随附 6 个可单独加载的 Skill，网页“协作 Skills”可阅读完整流程、复制调用提示和文件路径。
+随附 7 个可单独加载的 Skill，网页“协作 Skills”可阅读完整流程、复制调用提示和文件路径。
 
 | Skill | 用途 |
 | --- | --- |
@@ -100,6 +100,7 @@ Claude Code / 支持 MCP 的 pi 使用通用 stdio 配置：
 | `relay-execution` | 领取、检查点、证据提交 |
 | `relay-subagents` | 每层子 agent 登记、派发与来源明确的报告 |
 | `relay-review` | 独立验收和协调任务集成验证 |
+| `git-commit-style` | 单一目的提交、中文原因和统一标题格式 |
 | `relay-handoff` | 停止旧写入、交接和现场核验 |
 
 将所需 Skill 的整个目录放入客户端支持的技能目录，或让执行者直接读取对应 `SKILL.md`。Codex 常用 `~/.codex/skills/`，Claude Code 常用 `~/.claude/skills/`，pi 常用 `~/.pi/agent/skills/`。`task-continuity` 保留完整流程作为按需引用，单独安装也可使用；其他角色 Skill 的核心规则自包含。
@@ -111,19 +112,19 @@ Claude Code / 支持 MCP 的 pi 使用通用 stdio 配置：
 所有 CLI 请求都访问同一服务，stdio MCP 桥接同样不创建独立数据库。
 
 ```bash
-node bin/relayboard.js health
-node bin/relayboard.js query projects
-node bin/relayboard.js query snapshot '{"project_id":"PROJECT_ID"}'
-node bin/relayboard.js query eligible '{"project_id":"PROJECT_ID","run_id":"RUN_ID"}'
-node bin/relayboard.js context TASK_ID
-node bin/relayboard.js export TASK_ID
-node bin/relayboard.js operations
+node lib/bin/relayboard.js health
+node lib/bin/relayboard.js query projects
+node lib/bin/relayboard.js query snapshot '{"project_id":"PROJECT_ID"}'
+node lib/bin/relayboard.js query eligible '{"project_id":"PROJECT_ID","run_id":"RUN_ID"}'
+node lib/bin/relayboard.js context TASK_ID
+node lib/bin/relayboard.js export TASK_ID
+node lib/bin/relayboard.js operations
 ```
 
 写操作使用 `command OPERATION JSON`。JSON 可通过 `-` 从标准输入读取，避免 shell 引号问题；第四参数可提供稳定请求 ID，用于重试同一个请求。
 
 ```bash
-node bin/relayboard.js command task_checkpoint - checkpoint-request-001 <<'JSON'
+node lib/bin/relayboard.js command task_checkpoint - checkpoint-request-001 <<'JSON'
 {
   "task_id": "TASK_ID",
   "run_id": "RUN_ID",
@@ -155,9 +156,9 @@ JSON
 登记并领取任务后，可显式启动本机的 Codex、Claude Code 或 pi CLI。运行器传入有长度预算的接手包、环境中的项目服务地址和任务身份；保留 JSONL/文本日志，记录进程句柄与退出结果。默认每次最多运行 20 分钟，到时请求终止。
 
 ```bash
-node bin/relayboard.js run RUN_ID TASK_ID
-node bin/relayboard.js stop RUN_ID
-node bin/relayboard.js worktree PROJECT_ID '{"name":"login-api","base_ref":"HEAD"}'
+node lib/bin/relayboard.js run RUN_ID TASK_ID
+node lib/bin/relayboard.js stop RUN_ID
+node lib/bin/relayboard.js worktree PROJECT_ID '{"name":"login-api","base_ref":"HEAD"}'
 ```
 
 使用各工具现有的登录、默认模型和权限配置，不加入跳过权限或沙箱的参数。进程退出不自动宣布任务完成。AI 需要通过 MCP 或 CLI 报告实际检查点和证据。
@@ -208,7 +209,47 @@ npm run web:dev     # 另一个终端保留 npm start；Vite 在 5173 代理本�
 ```bash
 npm pack --pack-destination /absolute/path/to/releases
 # 核对包内容和发布身份后，发布已经验证过的同一个包：
-npm publish /absolute/path/to/releases/relayboard-0.2.0.tgz --access public --registry=https://registry.npmjs.org
+npm publish /absolute/path/to/releases/relayboard-0.3.0.tgz --access public --registry=https://registry.npmjs.org
 ```
 
 本次只生成、安装并验证了本地包，没有执行 npm 发布。发布者需使用有包名发布权限的 npm 账号。
+
+## TypeScript 开发与终端 MCP
+
+服务端、CLI、客户端适配器、网页组件和测试源码均使用 TypeScript；服务端以 `strict` + NodeNext 检查，网页单独检查 TSX，测试也参与严格类型检查。Zod 校验定义推导输入，持久化记录和命令结果通过实体契约关联。发布包只包含预编译 `lib/` 和 `dist/`，运行环境仍只需 Node.js 24+。
+
+```bash
+npm ci
+npm run check       # 严格类型检查、构建、行为测试
+npm run dev         # tsx 启动源码后台
+npm run web:dev     # Vite 网页开发
+npm run build       # 生成 lib/ 与 dist/
+npm start           # 运行编译后的版本
+```
+
+终端也能直接使用真实 MCP，不需要临时编写 SDK 客户端；以下命令连接同一共享服务：
+
+```bash
+node lib/bin/relayboard.js tools
+node lib/bin/relayboard.js tools relay_agent_register
+node lib/bin/relayboard.js call relay_projects '{}'
+node lib/bin/relayboard.js call relay_agent_register - <<'JSON'
+{"project_id":"PROJECT_ID","name":"Codex 当前会话","runtime":"codex","workdir":"/absolute/path/to/worktree"}
+JSON
+```
+
+`tools` 默认输出简短工具目录，指定名称时仅显示该工具的输入 schema，按需获取以节省上下文。`call` 使用官方 MCP SDK 的 Streamable HTTP 传输；已有 `query` / `command` 保留 REST 接入。`RELAYBOARD_URL` 默认 `http://127.0.0.1:4317`；两种方式共享同一令牌与数据库。
+
+`agent_register` 返回 `{ agent, run }`；任务操作使用 `run.id`。`task_split` 返回 `{ parent, children }`，拆分会更新父任务执行权，继续报告要用返回的 `parent.claim_epoch`。每个子 agent 使用自己的身份与工作树，并向父 Run 发送检查点、阻塞和交付报告。
+
+## 提交规范
+
+`git-commit-style` 随包分发，网页 Skills 可查看和复制；执行、子 agent、验收和交接 Skill 均在相应提交步骤引用它。源码项目的 `AGENTS.md` 同步声明规则。
+
+```text
+refactor(protocol): 关联命令输入和返回类型
+
+让调用方在编译期发现错误的执行者身份或缺失字段，减少多执行者集成时的协议误用。
+```
+
+标题格式 `类型(范围): 简述`，不超过 50 字符；空行后用中文解释为什么，避免列举文件。类型仅用 `feat`、`fix`、`refactor`、`docs`；每个 commit 只做一件事。执行者在看板记录提交哈希和实际验证，独立验收者检查差异与证据。

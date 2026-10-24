@@ -1,10 +1,43 @@
 # 验证记录
 
+当前版本：0.3.0。验证日期：2026-10-25，macOS / Node.js 24。以下先列本次结果，后续章节保留历史证据。
+
+## 0.3.0 · TypeScript 与真实 MCP 并行开发
+
+`npm run check` 通过：服务端、网页和测试严格类型检查，服务端编译、Vite 生产构建，47 项行为测试全部通过。源码目录没有遗留 `.js` / `.jsx`，也没有 `any`、`@ts-nocheck`、`@ts-ignore`。编译产物保留 `.js`，安装包用户只需 Node.js。
+
+- 三个原生 Codex 子 agent 分别在真实 Git worktree 中完成领域、运行时、网页迁移。每个子 agent 有独立 Run、父 Run、任务和执行权版本，通过真实 MCP 自己读取接手包、保存检查点和发送交付消息；父协调者独立验收。
+- 领域协议通过 Zod 推导输入，Store 按记录种类关联实体，Service 按操作名关联输入和结果；编译反例覆盖必需字段和错误身份字段。SQLite 真实连接抢占、范围冲突、后代处理、交接围栏和独立验收测试继续通过。
+- 新终端 `tools` 返回简短工具目录，指定名称仅返回单个工具 schema；`call` 使用官方 MCP SDK 的 Streamable HTTP 传输。回归测试覆盖 stdin 登记、领取、检查点、鉴权、未知工具及 JSON/纯文本错误保留。
+- 独立审查发现并修复了类型反例注释定位、projects 查询漏掉严格校验、源码 MCP 缺加载器三项问题。源码 CLI 和 stdio MCP 均从无 node_modules 的临时目录成功运行；发布包走 `lib/*.js`，不解析 tsx。
+- `git-commit-style` 原文随包分发，执行、子 agent、验收、交接与项目指令均在实际提交环节使用规范。7 个 Skill 通过 quick_validate；目录接口和源文件一致性、鉴权测试通过。实际提交采用允许类型、50 字符以内中文简述和解释原因的中文正文。
+
+### 安装包验证
+
+本地 tgz 在源码目录之外用独立 npm 缓存经真实 npx 安装启动。预构建 HTML/JS、7 个 Skill 和源文件接口、项目创建、真实 stdio MCP 握手、重启恢复、重复启动复用全部通过。安装环境未安装 Vite，包中没有 SQLite、个人日志、node_modules、工作树和测试数据。npm 尚未公开发布。
+
+### 网页与持续运行验证
+
+ego-browser 在独立数据库副本的编译版服务上验证项目切换、7 个 Skill、Git 提交规范弹窗、生成的 stdio 配置 `lib/bin/mcp.js`、父子 Run 树；桌面文档无横向溢出。截图 `relayboard-typescript-skills.png` 已查看。浏览器 TaskSpace 与临时 QA 服务已关闭。
+
+本机 4317 已确认运行编译版 0.3.0，仍指向原 `.relayboard/relayboard.sqlite`；重启前用 SQLite backup 备份，已确认没有托管运行进程或启用中的自动派发。本次没有启动额外 Claude/pi 付费模型会话；它们的适配器继续通过受控测试。
+
+### 使用中发现的体验问题
+
+1. 登记返回 `{agent, run}` 容易把逻辑 Agent 当作执行 Run：MCP 描述、Skill、终端例子明确使用 `run.id`。
+2. 拆分会更新父任务执行权：MCP 描述明确使用返回的 `parent.claim_epoch`。
+3. 全量工具 schema 开销大，临时 SDK 脚本接入繁琐：新增简短 `tools`、单工具 schema 和真实 MCP `call`。
+4. MCP 参数校验可能返回纯文本：客户端保留原始错误，避免 JSON 解析异常遮盖原因。
+5. 源码运行和安装包路径不同、agent 的工作目录常无开发依赖：统一生成完整启动参数，源码用绝对 loader，安装包用编译 JS。
+6. 工作树共享依赖时，未锚定的 `lib/` 忽略会误排除网页源码目录：修正为 `/lib/`，同时兼容 node_modules 软链接。
+
+## 历史验证
+
 验证日期：2026-10-24。环境：macOS，Node.js 24。本文件区分系统协议测试、浏览器操作与真实模型执行。
 
 ## 自动化验证
 
-`npm run check`：44 项测试全部通过，Vite 生产构建通过。
+历史 0.2.0 的 `npm run check`：44 项测试全部通过，Vite 生产构建通过。当前版本见下方 0.3.0 验证。
 
 - 两个独立 SQLite 连接同时竞争同一任务，仅一个领取成功。
 - 同目录重叠范围、符号链接别名和尚未创建的目录仍能识别冲突；实际 Git worktree 文件隔离通过。
