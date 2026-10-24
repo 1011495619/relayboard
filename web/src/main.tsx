@@ -139,6 +139,10 @@ import type {
   TaskStatus,
   QueryResults,
 } from "./types";
+import { AttentionView } from "./components/attention-view";
+import { ExecutionGuide } from "./components/execution-guide";
+import { ExecutionEditor } from "./components/execution-editor";
+import type { ExecutionPlan } from "../../server/types.js";
 import "./style.css";
 class ApiError extends Error {
   code?: string;
@@ -214,6 +218,7 @@ const eventNames: Record<string, string> = {
   "workspace.created": "创建工作区",
 };
 const icons: Record<string, LucideIcon> = {
+  home: Inbox,
   board: LayoutDashboard,
   join: ArrowUpRight,
   agents: Users,
@@ -224,6 +229,7 @@ const icons: Record<string, LucideIcon> = {
   skills: BookOpen,
 };
 const navItems = [
+  ["home", "关注事项"],
   ["board", "任务看板"],
   ["join", "领取工作"],
   ["agents", "执行者树"],
@@ -284,6 +290,8 @@ async function api<P extends string>(
 
 const query = <K extends keyof QueryResults>(name: K, args?: QueryInput<K>) =>
   api("/query", { query: name, args }) as Promise<QueryResults[K]>;
+const loadWorkGuide = (task_id: string, run_id: string) =>
+  query("work_next", { task_id, run_id, max_chars: 10000 });
 const command: Command = (operation, args) =>
   api("/command", {
     operation,
@@ -489,7 +497,7 @@ function App() {
       localStorage.getItem("relayboard-project") || "",
     ),
     [data, setData] = useState<Snapshot | null>(null);
-  const [view, setView] = useState("board"),
+  const [view, setView] = useState("home"),
     [runId, setRunId] = useState(localStorage.getItem("relayboard-run") || ""),
     [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState | null>(null),
@@ -766,7 +774,7 @@ function App() {
           href="#"
           onClick={(e) => {
             e.preventDefault();
-            setView("board");
+            setView("home");
           }}
         >
           <span className="brand-icon">
@@ -885,17 +893,11 @@ function App() {
         <div className="page">
           <div className="page-heading">
             <div>
-              <div className="eyebrow">
-                {view === "board"
-                  ? "PROJECT WORKSPACE"
-                  : view === "join"
-                    ? "FIND YOUR NEXT TASK"
-                    : "SHARED CONTEXT"}
-              </div>
               <h1>{navItems.find(([key]) => key === view)?.[1]}</h1>
               <p>
                 {
                   {
+                    home: "先看哪里需要处理，再继续下一步工作。",
                     board: "目标、进度与交接，留在同一个地方。",
                     join: "先检查依赖和修改范围，再领取适合你的工作。",
                     agents: "从主执行者到子 agent，每一份工作都有归属。",
@@ -980,6 +982,15 @@ function App() {
             )
           ) : (
             <>
+              {view === "home" && (
+                <AttentionView
+                  data={data}
+                  openTask={openTask}
+                  openBoard={() => setView("board")}
+                  openDiscussions={() => setView("discussions")}
+                  openJoin={() => setView("join")}
+                />
+              )}
               {["board", "join"].includes(view) && (
                 <>
                   <div className="project-brief">
@@ -2693,6 +2704,16 @@ function TaskDrawer({
               </div>
             </div>
           ))}
+          <ExecutionGuide
+            task={t}
+            loadGuide={loadWorkGuide}
+            onContext={() => {
+              void act(() => context(t));
+            }}
+            onCopied={() => {
+              toastManager.add({ title: "下一步调用已复制", type: "success" });
+            }}
+          />
           <section className="detail-section">
             <h3>目标与验收</h3>
             {t.description && <p>{t.description}</p>}
@@ -2904,6 +2925,9 @@ function Modal({
   const runs = data?.runs || [],
     tasks = data?.tasks || [];
 
+  const [execution, setExecution] = useState<ExecutionPlan | undefined>(
+    task?.execution ?? undefined,
+  );
   const [busy, setBusy] = useState(false),
     [formError, setFormError] = useState(""),
     [children, setChildren] = useState<ChildDraft[]>([
@@ -3017,6 +3041,7 @@ function Modal({
           depends_on: f.getAll("depends_on").map(String),
           priority: choice("priority", ["low", "normal", "high"]),
           required_capabilities: splitLines(value("required_capabilities")),
+          execution: execution ?? (task?.execution ? null : undefined),
         };
         if (task)
           result = await mutate(
@@ -3429,6 +3454,7 @@ function Modal({
                     required
                     placeholder="什么证据能证明任务已经完成？"
                   />
+                  <ExecutionEditor value={execution} onChange={setExecution} />
                   {!task && (
                     <Field label="父协调任务">
                       <NativeSelect
