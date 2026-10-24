@@ -1,18 +1,16 @@
 {
+  "extends": "./tsconfig.web.json",
   "compilerOptions": {
-    "target": "ES2023",
-    "strict": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "types": ["node", "vite/client"],
+    "allowImportingTsExtensions": true
   },
-  "files": [],
-  "references": [
-    {
-      "path": "./tsconfig.server.json"
-    },
-    {
-      "path": "./tsconfig.web.json"
-    }
+  "include": [
+    "server/**/*.ts",
+    "bin/**/*.ts",
+    "integrations/**/*.ts",
+    "web/src/**/*.ts",
+    "web/src/**/*.tsx",
+    "tests/**/*.ts",
+    "vite.config.ts"
   ]
 }

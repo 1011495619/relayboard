@@ -1,10 +1,10 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { Store } from "../server/store.js";
 import { Service } from "../server/domain.js";
 import { Scheduler } from "../server/scheduler.js";
 
-function fixture(t) {
+function fixture(t: TestContext) {
   const store = new Store(),
     s = new Service(store);
   t.after(() => store.close());
@@ -27,10 +27,10 @@ function fixture(t) {
       acceptance: "evidence",
       scopes: scope,
     });
-  const starts = [],
+  const starts: { run_id: string; task_id: string }[] = [],
     runner = {
       live: new Map(),
-      start: (args) => {
+      start: (args: { run_id: string; task_id: string }) => {
         starts.push(args);
       },
     };
@@ -116,8 +116,8 @@ test("budget disables dispatch and another executor only claims independent avai
   assert.equal(f.s.task(ta.id).owner_run_id, a.id);
   assert.equal(f.s.task(tb.id).owner_run_id, b.id);
   f.scheduler.tick();
-  assert.equal(f.s.run(a.id).dispatch.enabled, false);
-  assert.equal(f.s.run(b.id).dispatch.enabled, false);
+  assert.equal(f.s.run(a.id).dispatch!.enabled, false);
+  assert.equal(f.s.run(b.id).dispatch!.enabled, false);
 });
 
 test("a child blocker wakes its coordinator once without starting unrelated work", (t) => {
@@ -193,8 +193,8 @@ test("live handles and unknown processes block automatic redispatch; launch erro
     throw Error("fixture CLI missing");
   };
   f.scheduler.tick();
-  assert.equal(f.s.run(run.id).dispatch.enabled, false);
-  assert.ok(f.s.run(run.id).dispatch.last_error.includes("missing"));
+  assert.equal(f.s.run(run.id).dispatch!.enabled, false);
+  assert.ok(f.s.run(run.id).dispatch!.last_error!.includes("missing"));
   f.scheduler.tick();
-  assert.equal(f.s.run(run.id).dispatch.launches, 1);
+  assert.equal(f.s.run(run.id).dispatch!.launches, 1);
 });

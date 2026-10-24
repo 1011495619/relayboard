@@ -1,20 +1,19 @@
 {
   "name": "relayboard",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "A persistent task workspace for humans, Codex, Claude Code, pi, and their subagents.",
   "engines": {
     "node": ">=24"
   },
   "bin": {
-    "relayboard": "bin/relayboard.js"
+    "relayboard": "lib/bin/relayboard.js"
   },
   "files": [
-    "bin/",
-    "server/",
+    "lib/",
     "dist/",
     "skills/",
-    "integrations/",
+    "integrations/README.md",
     "README.md",
     "VALIDATION.md"
   ],
@@ -23,13 +22,16 @@
     "access": "public"
   },
   "scripts": {
-    "start": "node bin/relayboard.js start",
-    "dev": "node server/index.js",
+    "start": "node lib/bin/relayboard.js start",
+    "dev": "tsx server/index.ts",
     "web:dev": "vite --host 127.0.0.1",
-    "build": "vite build",
-    "test": "node --test tests/*.test.js",
-    "check": "npm run test && npm run build",
-    "mcp": "node bin/relayboard.js mcp",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:web": "vite build",
+    "build": "npm run build:server && npm run build:web",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json && tsc -p tsconfig.tests.json",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && npm run build && npm test",
+    "mcp": "node lib/bin/relayboard.js mcp",
     "prepack": "npm run build",
     "prepublishOnly": "npm run check"
   },

@@ -5,7 +5,7 @@ node -e 'if(Number(process.versions.node.split(".")[0]) < 24){console.error("Rel
 if [[ ! -d node_modules ]]; then
   npm ci
 fi
-if [[ ! -f dist/index.html ]]; then
+if [[ ! -f dist/index.html || ! -f lib/bin/relayboard.js ]]; then
   npm run build
 fi
 export RELAYBOARD_OPEN=1

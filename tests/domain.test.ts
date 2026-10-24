@@ -1,4 +1,6 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import type { Task, Run, RelayEvent } from "../server/types.js";
+import type { CommandInput } from "../server/schemas.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,7 +9,10 @@ import { Worker } from "node:worker_threads";
 import { Store } from "../server/store.js";
 import { Service } from "../server/domain.js";
 
-function fixture(t, opts = {}) {
+function fixture(
+  t: TestContext,
+  opts: Partial<CommandInput<"project_create">> = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), "relayboard-domain-"));
   const db = join(dir, "test.sqlite"),
     store = new Store(db),
@@ -22,7 +27,10 @@ function fixture(t, opts = {}) {
     root_path: dir,
     ...opts,
   });
-  const register = (name = "Codex", extra = {}) =>
+  const register = (
+    name = "Codex",
+    extra: Partial<CommandInput<"agent_register">> = {},
+  ) =>
     s.execute("agent_register", {
       project_id: project.id,
       name,
@@ -30,7 +38,10 @@ function fixture(t, opts = {}) {
       workdir: dir,
       ...extra,
     }).run;
-  const create = (title = "认证接口", extra = {}) =>
+  const create = (
+    title = "认证接口",
+    extra: Partial<CommandInput<"task_create">> = {},
+  ) =>
     s.execute("task_create", {
       project_id: project.id,
       title,
@@ -38,13 +49,17 @@ function fixture(t, opts = {}) {
       scopes: ["src/api"],
       ...extra,
     });
-  const claim = (task, run) =>
+  const claim = (task: Task, run: Run) =>
     s.execute("task_claim", {
       task_id: task.id,
       expected_version: task.version,
       run_id: run.id,
     });
-  const checkpoint = (task, run, extra = {}) =>
+  const checkpoint = (
+    task: Task,
+    run: Run,
+    extra: Partial<CommandInput<"task_checkpoint">> = {},
+  ) =>
     s.execute("task_checkpoint", {
       task_id: task.id,
       run_id: run.id,
@@ -59,13 +74,18 @@ function fixture(t, opts = {}) {
     });
   return { dir, db, s, store, project, register, create, claim, checkpoint };
 }
-const child = (title, scopes, extra = {}) => ({
+const child = (
+  title: string,
+  scopes: string[],
+  extra: Partial<CommandInput<"task_create">> = {},
+) => ({
   title,
   scopes,
   acceptance: "通过独立检查",
   ...extra,
 });
-const code = (expected) => (error) => error.code === expected;
+const code = (expected: string) => (error: unknown) =>
+  error instanceof Error && "code" in error && error.code === expected;
 
 test("claim uses a revision and fences writes from a previous owner after handoff", (t) => {
   const f = fixture(t),
@@ -185,7 +205,7 @@ test("coordinator ownership leaves independent child tasks available to other to
   assert.equal(
     f.s
       .query("snapshot", { project_id: f.project.id })
-      .runs.find((r) => r.id === sub.id).parent_run_id,
+      .runs.find((r) => r.id === sub.id)!.parent_run_id,
     rootRun.id,
   );
 });
@@ -319,7 +339,7 @@ test("another owner proposes decomposition and cannot directly split the claimed
     approved: true,
     note: "分工确认",
   });
-  assert.equal(result.split.children.length, 2);
+  assert.equal(result.split!.children.length, 2);
   assert.throws(
     () =>
       f.s.execute("proposal_resolve", {
@@ -433,7 +453,7 @@ test("handoff explicitly handles active descendants and transfers their reportin
     descendants: "continue",
   });
   assert.equal(f.s.run(sub.id).parent_run_id, b.id);
-  assert.equal(result.handoff.descendant_task_ids.length, 1);
+  assert.equal(result.handoff!.descendant_task_ids.length, 1);
   assert.equal(f.s.query("inbox", { run_id: sub.id }).length, 1);
 });
 
@@ -515,7 +535,7 @@ test("restart retains claims, checkpoints, messages and bounded handoff packets"
   const restarted = new Service(secondStore);
   const snapshot = restarted.query("snapshot", { project_id: f.project.id });
   assert.equal(snapshot.tasks[0].owner_run_id, a.id);
-  assert.equal(snapshot.tasks[0].checkpoint.summary, "实现已保存");
+  assert.equal(snapshot.tasks[0].checkpoint!.summary, "实现已保存");
   const packet = restarted.query("context", {
     task_id: task.id,
     max_chars: 1500,
@@ -630,7 +650,7 @@ test("children must be accepted before fresh parent integration evidence can sub
 
 test("event observers only see committed work, including adapter events outside command execution", (t) => {
   const f = fixture(t),
-    events = [];
+    events: RelayEvent[] = [];
   f.s.listeners.add((e) => events.push(e));
   const p = f.create("Parent", { scopes: ["src"] });
   const before = events.length;
@@ -646,7 +666,7 @@ test("event observers only see committed work, including adapter events outside 
   f.store.transaction(() =>
     f.s.emit(f.project.id, "adapter.fixture", { summary: "committed" }),
   );
-  assert.equal(events.at(-1).type, "adapter.fixture");
+  assert.equal(events.at(-1)!.type, "adapter.fixture");
 });
 
 test("two independent SQLite connections racing a claim yield exactly one owner", async (t) => {
@@ -657,7 +677,7 @@ test("two independent SQLite connections racing a claim yield exactly one owner"
   const barrier = new SharedArrayBuffer(4);
   const workers = [a, b].map(
     (run) =>
-      new Worker(new URL("./race-worker.js", import.meta.url), {
+      new Worker(new URL("./race-worker.ts", import.meta.url), {
         workerData: {
           db: f.db,
           barrier,
@@ -672,12 +692,14 @@ test("two independent SQLite connections racing a claim yield exactly one owner"
   );
   const outcomes = workers.map(
     (w) =>
-      new Promise((resolve, reject) => {
-        w.on("message", (m) => {
-          if (m !== "ready") resolve(m);
-        });
-        w.on("error", reject);
-      }),
+      new Promise<{ ok: boolean; owner?: string; code?: string }>(
+        (resolve, reject) => {
+          w.on("message", (m) => {
+            if (m !== "ready") resolve(m);
+          });
+          w.on("error", reject);
+        },
+      ),
   );
   await Promise.all(
     workers.map((w) => new Promise((resolve) => w.once("message", resolve))),

@@ -1,4 +1,9 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import type { AddressInfo } from "node:net";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { AppOptions } from "../server/app.js";
+import type { CommandInput, CommandName } from "../server/schemas.js";
+import type { CommandResult } from "../server/types.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,15 +17,21 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { createApp } from "../server/app.js";
 import { createWorktree } from "../server/runner.js";
 
+function mcpText(result: CallToolResult): string {
+  const text = result.content.find((c) => c.type === "text");
+  assert.ok(text && text.type === "text");
+  return text.text;
+}
+
 const exec = promisify(execFile);
-const cli = fileURLToPath(new URL("../bin/relayboard.js", import.meta.url));
-const bridge = fileURLToPath(new URL("../bin/mcp.js", import.meta.url));
-async function fixture(t, opts = {}) {
+const cli = fileURLToPath(new URL("../lib/bin/relayboard.js", import.meta.url));
+const bridge = fileURLToPath(new URL("../lib/bin/mcp.js", import.meta.url));
+async function fixture(t: TestContext, opts: Partial<AppOptions> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "relayboard-http-"));
   const instance = createApp({ dataDir: dir, port: 0, ...opts });
   const server = instance.app.listen(0, "127.0.0.1");
-  await new Promise((resolve) => server.once("listening", resolve));
-  const url = `http://127.0.0.1:${server.address().port}`;
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   instance.runner.baseUrl = url;
   t.after(async () => {
     await instance.close();
@@ -32,7 +43,11 @@ async function fixture(t, opts = {}) {
     "Content-Type": "application/json",
     ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
   };
-  const post = async (path, body, extra = {}) => {
+  const post = async (
+    path: string,
+    body: unknown,
+    extra: Record<string, string> = {},
+  ) => {
     const res = await fetch(url + path, {
       method: "POST",
       headers: { ...headers, ...extra },
@@ -40,14 +55,17 @@ async function fixture(t, opts = {}) {
     });
     return { status: res.status, ...(await res.json()) };
   };
-  const command = async (operation, args) => {
+  const command = async <K extends CommandName>(
+    operation: K,
+    args: CommandInput<K>,
+  ): Promise<CommandResult<K>> => {
     const result = await post("/api/command", { operation, args });
     assert.equal(result.status, 200, JSON.stringify(result));
     return result.result;
   };
   return { ...instance, server, url, dir, headers, post, command };
 }
-async function until(fn, timeout = 6000) {
+async function until(fn: () => boolean, timeout = 6000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
     const value = fn();
@@ -136,19 +154,22 @@ test("real MCP HTTP client discovers tools, creates project and receives structu
     name: "relay_project_create",
     arguments: { name: "MCP", objective: "shared task" },
   });
-  const project = JSON.parse(result.content[0].text);
+  const project = JSON.parse(mcpText(result as CallToolResult));
   assert.equal(project.name, "MCP");
   const query = await client.callTool({
     name: "relay_projects",
     arguments: {},
   });
-  assert.equal(JSON.parse(query.content[0].text)[0].id, project.id);
+  assert.equal(JSON.parse(mcpText(query as CallToolResult))[0].id, project.id);
   const missing = await client.callTool({
     name: "relay_task",
     arguments: { task_id: "missing" },
   });
   assert.equal(missing.isError, true);
-  assert.equal(JSON.parse(missing.content[0].text).code, "NOT_FOUND");
+  assert.equal(
+    JSON.parse(mcpText(missing as CallToolResult)).code,
+    "NOT_FOUND",
+  );
 });
 
 test("stdio MCP bridge and CLI use the same authenticated HTTP state", async (t) => {
@@ -185,7 +206,7 @@ test("stdio MCP bridge and CLI use the same authenticated HTTP state", async (t)
       arguments: { project_id: project.id },
     });
     assert.equal(
-      JSON.parse(result.content[0].text).project.name,
+      JSON.parse(mcpText(result as CallToolResult)).project.name,
       "CLI project",
     );
   }
@@ -290,7 +311,8 @@ test("stopping a managed process preserves task claims and allows explicit hando
         confirmed_stop: true,
         summary: "transfer",
       }),
-    (e) => e.code === "PROCESS_RUNNING",
+    (e: unknown) =>
+      e instanceof Error && "code" in e && e.code === "PROCESS_RUNNING",
   );
   f.runner.stop(run.id);
   await until(() => f.service.run(run.id).process?.status === "stopped");
@@ -350,8 +372,11 @@ test("skill catalog exposes bundled roles and exact sources behind authenticatio
   const catalog = await (
     await fetch(`${f.url}/api/skills`, { headers: f.headers })
   ).json();
-  assert.equal(catalog.result.length, 6);
-  assert.equal(new Set(catalog.result.map((s) => s.name)).size, 6);
+  assert.equal(catalog.result.length, 7);
+  assert.equal(
+    new Set(catalog.result.map((s: { name: string }) => s.name)).size,
+    7,
+  );
   for (const skill of catalog.result) {
     assert.ok(existsSync(skill.path));
     const res = await fetch(`${f.url}/api/skills/${skill.name}`, {

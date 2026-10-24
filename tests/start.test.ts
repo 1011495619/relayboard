@@ -1,4 +1,5 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,8 +12,8 @@ import { defaultDataDir, version } from "../server/config.js";
 import { startServer } from "../server/start.js";
 
 const exec = promisify(execFile);
-const cli = fileURLToPath(new URL("../bin/relayboard.js", import.meta.url));
-function temporary(t) {
+const cli = fileURLToPath(new URL("../lib/bin/relayboard.js", import.meta.url));
+function temporary(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), "relayboard-start-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
@@ -66,14 +67,16 @@ test("data lives outside npm caches and working directories while existing sourc
 
 test("launcher serves prebuilt web, reuses its running service and preserves data on restart", async (t) => {
   const dir = temporary(t),
-    messages = [];
+    messages: string[] = [];
   const first = await startServer({
     port: 0,
     dataDir: dir,
     log: (s) => messages.push(s),
   });
+  assert.equal(first.reused, false);
+  if (first.reused) throw new Error("Expected new fixture server");
   t.after(() => first.close());
-  const port = first.server.address().port;
+  const port = (first.server.address() as AddressInfo).port;
   const project = first.service.execute("project_create", {
     name: "npx board",
     objective: "Persist across package updates",
@@ -92,6 +95,8 @@ test("launcher serves prebuilt web, reuses its running service and preserves dat
   assert.equal(first.service.query("projects")[0].id, project.id);
   await first.close();
   const restarted = await startServer({ port: 0, dataDir: dir, log: () => {} });
+  assert.equal(restarted.reused, false);
+  if (restarted.reused) throw new Error("Expected restarted fixture server");
   t.after(() => restarted.close());
   assert.equal(restarted.service.query("projects")[0].id, project.id);
   assert.ok(messages[0].includes(dir));
@@ -103,10 +108,14 @@ test("a different HTTP service is not mistaken for an existing board", async (t)
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({ ok: true }));
   });
-  await new Promise((resolve) => foreign.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => foreign.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => foreign.close(resolve)));
   await assert.rejects(
-    startServer({ port: foreign.address().port, dataDir: dir, log: () => {} }),
+    startServer({
+      port: (foreign.address() as AddressInfo).port,
+      dataDir: dir,
+      log: () => {},
+    }),
     /其他服务占用/,
   );
 });
@@ -124,7 +133,13 @@ test("CLI reports its version and validates launch arguments before starting", a
   ]) {
     await assert.rejects(
       exec(process.execPath, [cli, ...args]),
-      (e) => e.code === 1 && !!e.stderr.trim(),
+      (e: unknown) =>
+        e instanceof Error &&
+        "code" in e &&
+        e.code === 1 &&
+        "stderr" in e &&
+        typeof e.stderr === "string" &&
+        !!e.stderr.trim(),
     );
   }
 });
