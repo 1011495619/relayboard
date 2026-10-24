@@ -3,16 +3,26 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+const moduleRoot = fileURLToPath(new URL("../", import.meta.url));
+export const packageRoot = existsSync(join(moduleRoot, "package.json"))
+  ? moduleRoot
+  : resolve(moduleRoot, "..");
+export const runtimeRoot = moduleRoot;
+export const runtimeExtension = import.meta.url.endsWith(".ts") ? "ts" : "js";
 export const version = JSON.parse(
   readFileSync(join(packageRoot, "package.json"), "utf8"),
-).version;
+).version as string;
 
 export function defaultDataDir({
   platform = process.platform,
   env = process.env,
   home = homedir(),
   legacyRoot = packageRoot,
+}: {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  legacyRoot?: string;
 } = {}) {
   if (env.RELAYBOARD_DATA_DIR) return resolve(env.RELAYBOARD_DATA_DIR);
   // Preserve a source checkout's existing board. npm packages never contain it.

@@ -1,4 +1,8 @@
-import { spawn, execFile } from "node:child_process";
+import {
+  spawn,
+  execFile,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import { promisify } from "node:util";
 import {
   mkdirSync,
@@ -11,16 +15,63 @@ import {
 } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AppError } from "./domain.js";
+import type { ProcessInfo } from "./types.js";
+import { errorInfo } from "../bin/errors.js";
+import { AppError, type Service } from "./domain.js";
 
 const exec = promisify(execFile);
-const cli = fileURLToPath(new URL("../bin/relayboard.js", import.meta.url));
+const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
+const cli = fileURLToPath(
+  new URL(`../bin/relayboard.${extension}`, import.meta.url),
+);
+const cliCommand = [
+  process.execPath,
+  ...(extension === "ts" ? ["--import", "tsx"] : []),
+  cli,
+]
+  .map((value) => JSON.stringify(value))
+  .join(" ");
 const stamp = () => new Date().toISOString();
 
+export interface RunnerProfile {
+  command: string;
+  args: string[];
+  stdin?: boolean;
+}
+interface ManagedChild {
+  child: ChildProcessWithoutNullStreams;
+  task_id: string;
+  logPath: string;
+  timer?: NodeJS.Timeout;
+  heartbeat?: NodeJS.Timeout;
+  stopped: boolean;
+  outputBuffer: string;
+  finished: boolean;
+}
+export interface RunnerOptions {
+  dataDir: string;
+  baseUrl: string;
+  token?: string;
+  profiles?: Record<string, RunnerProfile>;
+  timeoutMs?: number;
+}
 export class Runner {
+  service: Service;
+  dataDir: string;
+  baseUrl: string;
+  token: string;
+  timeoutMs: number;
+  profiles: Record<string, RunnerProfile>;
+  live: Map<string, ManagedChild>;
   constructor(
-    service,
-    { dataDir, baseUrl, token = "", profiles, timeoutMs = 1200000 } = {},
+    service: Service,
+    {
+      dataDir,
+      baseUrl,
+      token = "",
+      profiles,
+      timeoutMs = 1200000,
+    }: RunnerOptions,
   ) {
     this.service = service;
     this.dataDir = dataDir;
@@ -83,7 +134,7 @@ export class Runner {
     );
     return entries;
   }
-  start({ run_id, task_id }) {
+  start({ run_id, task_id }: { run_id: string; task_id: string }) {
     const s = this.service,
       run = s.run(run_id),
       task = s.task(task_id);
@@ -152,7 +203,7 @@ export class Runner {
       unread_only: true,
       limit: 10,
     });
-    const prompt = `${packet.markdown}\n\n## Directed inbox (prior messages; verify claims, acknowledge after reading)\n${inbox.map((m) => `${m.id} [${m.kind}]: ${m.body.slice(0, 1000)}`).join("\n") || "No unread messages."}\n\n## Relayboard execution protocol\nYour run_id is ${run.id}. Your claim_epoch is ${task.claim_epoch}.\nUse the shared Relayboard MCP tools if configured; otherwise invoke the CLI with JSON arguments:\n${JSON.stringify(process.execPath)} ${JSON.stringify(cli)} query task '{"task_id":"${task.id}"}'\n${JSON.stringify(process.execPath)} ${JSON.stringify(cli)} command task_checkpoint '{"task_id":"${task.id}","run_id":"${run.id}","claim_epoch":${task.claim_epoch},"summary":"concrete progress","next_step":"specific next action"}'\nRELAYBOARD_URL and RELAYBOARD_TOKEN are inherited. Register children with agent_register and parent_run_id BEFORE dispatch. Give each child its own run_id and task claim. Do not start unregistered children. Poll inbox between meaningful steps. Persist checkpoint and evidence; submit for review only after verification. Do not automatically approve your own work. If status is reconcile, invoke task_reconcile after inspecting the actual workspace before editing. The task scope is a cooperative constraint, not a filesystem sandbox. Preserve all existing user permissions.\n`;
+    const prompt = `${packet.markdown}\n\n## Directed inbox (prior messages; verify claims, acknowledge after reading)\n${inbox.map((m) => `${m.id} [${m.kind}]: ${m.body.slice(0, 1000)}`).join("\n") || "No unread messages."}\n\n## Relayboard execution protocol\nYour run_id is ${run.id}. Your claim_epoch is ${task.claim_epoch}.\nUse the shared Relayboard MCP tools if configured; otherwise invoke the CLI with JSON arguments:\n${cliCommand} query task '{"task_id":"${task.id}"}'\n${cliCommand} command task_checkpoint '{"task_id":"${task.id}","run_id":"${run.id}","claim_epoch":${task.claim_epoch},"summary":"concrete progress","next_step":"specific next action"}'\nRELAYBOARD_URL and RELAYBOARD_TOKEN are inherited. Register children with agent_register and parent_run_id BEFORE dispatch. Give each child its own run_id and task claim. Do not start unregistered children. Poll inbox between meaningful steps. Persist checkpoint and evidence; submit for review only after verification. Do not automatically approve your own work. If status is reconcile, invoke task_reconcile after inspecting the actual workspace before editing. The task scope is a cooperative constraint, not a filesystem sandbox. Preserve all existing user permissions.\n`;
     const profile = this.profiles[run.runtime],
       args = [...profile.args, ...(profile.stdin ? ["-"] : [prompt])];
     const logPath = join(this.dataDir, "logs", `${run.id}.log`);
@@ -173,17 +224,17 @@ export class Runner {
       detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });
-    const record = {
+    const record: ManagedChild = {
       child,
       task_id,
       logPath,
-      timer: null,
+      timer: undefined,
       stopped: false,
       outputBuffer: "",
       finished: false,
     };
     this.live.set(run.id, record);
-    const processInfo = {
+    const processInfo: ProcessInfo = {
       status: "running",
       pid: child.pid || null,
       started_at: stamp(),
@@ -203,7 +254,7 @@ export class Runner {
         summary: `${run.runtime} 托管进程已启动`,
       });
     });
-    const output = (chunk, stream) => {
+    const output = (chunk: Buffer, stream: "stdout" | "stderr") => {
       const text = chunk.toString();
       appendFileSync(logPath, text);
       if (stream === "stdout") {
@@ -232,7 +283,11 @@ export class Runner {
     };
     child.stdout.on("data", (chunk) => output(chunk, "stdout"));
     child.stderr.on("data", (chunk) => output(chunk, "stderr"));
-    const finish = (code, signal, error) => {
+    const finish = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+      error?: Error,
+    ) => {
       if (record.finished) return;
       record.finished = true;
       clearInterval(record.heartbeat);
@@ -292,7 +347,7 @@ export class Runner {
     record.heartbeat.unref();
     return { run_id: run.id, process: processInfo };
   }
-  stop(runId, reason = "用户请求停止") {
+  stop(runId: string, reason = "用户请求停止") {
     const record = this.live.get(runId);
     if (!record)
       throw new AppError(
@@ -306,16 +361,16 @@ export class Runner {
     );
     try {
       if (process.platform !== "win32")
-        process.kill(-record.child.pid, "SIGTERM");
+        process.kill(-record.child.pid!, "SIGTERM");
       else record.child.kill("SIGTERM");
     } catch (error) {
-      if (error.code !== "ESRCH") throw error;
+      if (errorInfo(error).code !== "ESRCH") throw error;
     }
     const timer = setTimeout(() => {
       if (!record.finished)
         try {
           if (process.platform !== "win32")
-            process.kill(-record.child.pid, "SIGKILL");
+            process.kill(-record.child.pid!, "SIGKILL");
           else record.child.kill("SIGKILL");
         } catch {
           /* Already exited. */
@@ -324,7 +379,7 @@ export class Runner {
     timer.unref();
     return { run_id: runId, stopping: true };
   }
-  logs(runId) {
+  logs(runId: string) {
     const run = this.service.run(runId),
       path = run.process?.log_path;
     if (!path || !existsSync(path))
@@ -347,16 +402,22 @@ export class Runner {
       children.map((r) =>
         r.finished
           ? Promise.resolve()
-          : new Promise((resolve) => r.child.once("close", resolve)),
+          : new Promise<void>((resolve) =>
+              r.child.once("close", () => resolve()),
+            ),
       ),
     );
   }
 }
 
 export async function createWorktree(
-  service,
-  dataDir,
-  { project_id, name, base_ref = "HEAD" },
+  service: Service,
+  dataDir: string,
+  {
+    project_id,
+    name,
+    base_ref = "HEAD",
+  }: { project_id: string; name: string; base_ref?: string },
 ) {
   const project = service.get("project", project_id);
   if (!project.root_path)

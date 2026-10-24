@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { errorInfo } from "./errors.js";
 import { readFileSync } from "node:fs";
 import { request } from "./client.js";
 import { commands } from "../server/schemas.js";
@@ -39,7 +40,9 @@ async function main() {
       throw Error(
         "Relayboard 需要 Node.js 24 或更高版本，请升级 Node.js 后重试。",
       );
-    const options = { open: process.env.RELAYBOARD_OPEN !== "0" };
+    const options: { open: boolean; port?: number; dataDir?: string } = {
+      open: process.env.RELAYBOARD_OPEN !== "0",
+    };
     const flags = process.argv.slice(mode === "start" ? 3 : 2);
     for (let i = 0; i < flags.length; i++) {
       const flag = flags[i];
@@ -72,7 +75,7 @@ async function main() {
     await import("./mcp.js");
     return;
   }
-  let result;
+  let result: unknown;
   const args = ["query", "command", "worktree"].includes(mode)
     ? raw === "-"
       ? JSON.parse(readFileSync(0, "utf8"))
@@ -115,16 +118,18 @@ async function main() {
     throw Error(`未知命令：${mode}。使用 --help 查看用法。`);
   }
   console.log(
-    mode === "context" ? result.markdown : JSON.stringify(result, null, 2),
+    mode === "context"
+      ? (result as { markdown: string }).markdown
+      : JSON.stringify(result, null, 2),
   );
 }
 
 main().catch((error) => {
   console.error(
     JSON.stringify({
-      code: error.code || "ERROR",
-      message: error.message,
-      details: error.details,
+      code: errorInfo(error).code || "ERROR",
+      message: errorInfo(error).message,
+      details: errorInfo(error).details,
     }),
   );
   process.exitCode = 1;

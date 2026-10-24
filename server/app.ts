@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,21 +8,35 @@ import { z, ZodError } from "zod";
 import { Store } from "./store.js";
 import { Service, AppError } from "./domain.js";
 import { createMcp } from "./mcp.js";
-import { Runner, createWorktree } from "./runner.js";
+import { Runner, createWorktree, type RunnerProfile } from "./runner.js";
 import { Scheduler } from "./scheduler.js";
-import { defaultDataDir, version } from "./config.js";
+import {
+  packageRoot,
+  runtimeRoot,
+  runtimeExtension,
+  defaultDataDir,
+  version,
+} from "./config.js";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
-const secureEqual = (a, b) =>
+import { errorInfo } from "../bin/errors.js";
+const root = packageRoot;
+const secureEqual = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
+export interface AppOptions {
+  dataDir?: string;
+  token?: string;
+  port?: number;
+  runnerProfiles?: Record<string, RunnerProfile>;
+  runnerTimeoutMs?: number;
+}
 export function createApp({
   dataDir = defaultDataDir(),
   token = process.env.RELAYBOARD_TOKEN || "",
   port = 4317,
   runnerProfiles,
   runnerTimeoutMs,
-} = {}) {
+}: AppOptions = {}) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const store = new Store(join(dataDir, "relayboard.sqlite")),
     service = new Service(store);
@@ -119,7 +133,7 @@ export function createApp({
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders();
     res.write("event: connected\ndata: {}\n\n");
-    const listener = (event) => {
+    const listener: Parameters<typeof service.listeners.add>[0] = (event) => {
       if (event.project_id === project)
         res.write(
           `id: ${event.seq}\nevent: update\ndata: ${JSON.stringify(event)}\n\n`,
@@ -135,9 +149,13 @@ export function createApp({
   app.get("/api/runtimes", async (req, res) =>
     res.json({ result: await runner.availability() }),
   );
-  const skillCatalog = JSON.parse(
-    readFileSync(join(root, "skills/catalog.json"), "utf8"),
-  );
+  const skillCatalog: {
+    name: string;
+    title: string;
+    role: string;
+    description: string;
+    prompt: string;
+  }[] = JSON.parse(readFileSync(join(root, "skills/catalog.json"), "utf8"));
   app.get("/api/skills", (req, res) =>
     res.json({
       result: skillCatalog.map((skill) => ({
@@ -166,8 +184,8 @@ export function createApp({
     res.json({
       result: {
         base_url: `http://127.0.0.1:${port}`,
-        cli: join(root, "bin/relayboard.js"),
-        mcp: join(root, "bin/mcp.js"),
+        cli: join(runtimeRoot, `bin/relayboard.${runtimeExtension}`),
+        mcp: join(runtimeRoot, `bin/mcp.${runtimeExtension}`),
         skill: join(root, "skills/task-continuity"),
         node: process.execPath,
         token_required: !!token,
@@ -192,7 +210,7 @@ export function createApp({
     }),
   );
   app.get("/api/runner/logs/:run", (req, res) =>
-    res.json({ result: runner.logs(req.params.run) }),
+    res.json({ result: runner.logs(String(req.params.run)) }),
   );
   app.post("/api/worktree", async (req, res) => {
     const args = z
@@ -262,7 +280,7 @@ export function createApp({
         .type("text")
         .send("运行 npm run build 后启动网页，或使用 npm run web:dev。"),
     );
-  app.use((error, req, res, next) => {
+  const handleError: ErrorRequestHandler = (error: unknown, req, res, next) => {
     if (res.headersSent) return next(error);
     if (error instanceof ZodError)
       return res.status(400).json({
@@ -280,7 +298,7 @@ export function createApp({
           details: error.details,
         },
       });
-    if (error.type === "entity.parse.failed")
+    if (errorInfo(error).type === "entity.parse.failed")
       return res.status(400).json({
         error: { code: "INVALID_JSON", message: "请求须为有效 JSON" },
       });
@@ -291,7 +309,8 @@ export function createApp({
         message: "服务发生错误，详情已记录在服务日志",
       },
     });
-  });
+  };
+  app.use(handleError);
   return {
     app,
     store,

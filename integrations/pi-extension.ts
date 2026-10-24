@@ -1,5 +1,44 @@
+import { errorInfo } from "../bin/errors.js";
+export interface ExtensionContext {
+  ui?: { notify?: (text: string, level: "warning") => void };
+}
+export interface Injection {
+  message: { customType: string; content: string; display: boolean };
+}
+export interface PiExtensionApi {
+  registerMcpServer?: (
+    name: string,
+    config: {
+      url: string;
+      headers: Record<string, string>;
+      exposure: string;
+      description: string;
+    },
+  ) => void;
+  on: (
+    event:
+      | "session_start"
+      | "before_agent_start"
+      | "session_before_compact"
+      | "session_compact"
+      | "session_shutdown",
+    handler: (
+      event: unknown,
+      context: ExtensionContext,
+    ) => Promise<void | Injection>,
+  ) => void;
+  appendEntry?: (type: string, value: Record<string, unknown>) => void;
+}
+interface InboxMessage {
+  id: string;
+  body: string;
+}
+interface Packet {
+  version: number;
+  markdown: string;
+}
 /** Optional pi extension. No provider calls, no automatic agent spawning. */
-export default function relayboardExtension(pi) {
+export default function relayboardExtension(pi: PiExtensionApi) {
   const url = process.env.RELAYBOARD_URL || "http://127.0.0.1:4317";
   const runId = process.env.RELAYBOARD_RUN_ID;
   const taskId = process.env.RELAYBOARD_TASK_ID;
@@ -9,22 +48,29 @@ export default function relayboardExtension(pi) {
       ? { Authorization: `Bearer ${process.env.RELAYBOARD_TOKEN}` }
       : {}),
   };
-  let timer,
-    signature = "",
+  let timer: NodeJS.Timeout | undefined;
+  let signature = "",
     warned = false;
-  const request = async (path, body) => {
+  const request = async <T = unknown>(
+    path: string,
+    body: unknown,
+  ): Promise<T> => {
     const response = await fetch(url + path, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
-    const value = await response.json();
+    const value = (await response.json()) as {
+      result: T;
+      error?: { message?: string };
+    };
     if (!response.ok)
       throw new Error(value.error?.message || `HTTP ${response.status}`);
     return value.result;
   };
-  const query = (name, args) => request("/api/query", { query: name, args });
+  const query = <T>(name: string, args: Record<string, unknown>) =>
+    request<T>("/api/query", { query: name, args });
   const heartbeat = () =>
     runId
       ? request("/api/command", {
@@ -36,10 +82,10 @@ export default function relayboardExtension(pi) {
           },
         })
       : Promise.resolve();
-  const reportError = (error, ctx) => {
+  const reportError = (error: unknown, ctx?: ExtensionContext) => {
     if (!warned) {
       warned = true;
-      ctx?.ui?.notify?.(`Relayboard: ${error.message}`, "warning");
+      ctx?.ui?.notify?.(`Relayboard: ${errorInfo(error).message}`, "warning");
     }
   };
   if (typeof pi.registerMcpServer === "function")
@@ -71,9 +117,12 @@ export default function relayboardExtension(pi) {
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!runId) return;
     try {
-      const inbox = await query("inbox", { run_id: runId, limit: 12 });
+      const inbox = await query<InboxMessage[]>("inbox", {
+        run_id: runId,
+        limit: 12,
+      });
       const packet = taskId
-        ? await query("context", { task_id: taskId, max_chars: 9000 })
+        ? await query<Packet>("context", { task_id: taskId, max_chars: 9000 })
         : null;
       const next = `${packet?.version || ""}:${inbox.map((m) => m.id).join(",")}`;
       if (signature === next) return;
@@ -89,7 +138,9 @@ export default function relayboardExtension(pi) {
   pi.on("session_before_compact", async (_event, ctx) => {
     if (!taskId) return;
     try {
-      const result = await request("/api/export", { task_id: taskId });
+      const result = await request<{ path: string }>("/api/export", {
+        task_id: taskId,
+      });
       pi.appendEntry?.("relayboard-snapshot", {
         task_id: taskId,
         path: result.path,
@@ -108,7 +159,7 @@ export default function relayboardExtension(pi) {
     timer = undefined;
     if (taskId)
       try {
-        await request("/api/export", { task_id: taskId });
+        await request<{ path: string }>("/api/export", { task_id: taskId });
       } catch {
         /* Last persisted checkpoints remain available. */
       }

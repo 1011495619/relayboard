@@ -1,9 +1,20 @@
+import type { Service } from "./domain.js";
+import { errorInfo } from "../bin/errors.js";
+
 /** Bounded local dispatcher. Only explicitly enabled Runs may start paid CLI work. */
+export interface SchedulerRunner {
+  live: ReadonlyMap<string, unknown>;
+  start: (args: { run_id: string; task_id: string }) => unknown;
+}
 export class Scheduler {
-  constructor(service, runner) {
+  service: Service;
+  runner: SchedulerRunner;
+  timer: NodeJS.Timeout | undefined;
+  running: boolean;
+  constructor(service: Service, runner: SchedulerRunner) {
     this.service = service;
     this.runner = runner;
-    this.timer = null;
+    this.timer = undefined;
     this.running = false;
   }
   start(interval = 5000) {
@@ -14,7 +25,7 @@ export class Scheduler {
   }
   stop() {
     clearInterval(this.timer);
-    this.timer = null;
+    this.timer = undefined;
   }
   tick() {
     if (this.running || process.env.RELAYBOARD_RUNNERS === "0") return;
@@ -25,15 +36,17 @@ export class Scheduler {
         if (
           !candidate.dispatch?.enabled ||
           candidate.status !== "active" ||
-          ["running", "unknown"].includes(candidate.process?.status) ||
+          ["running", "unknown"].includes(candidate.process?.status || "") ||
           this.runner.live.has(candidate.id)
         )
           continue;
         let run = s.run(candidate.id);
-        if (run.dispatch.launches >= run.dispatch.max_launches) {
+        const dispatch = run.dispatch;
+        if (!dispatch) continue;
+        if (dispatch.launches >= dispatch.max_launches) {
           s.store.transaction(() => {
             s.update("run", run, {
-              dispatch: { ...run.dispatch, enabled: false },
+              dispatch: { ...dispatch, enabled: false },
             });
             s.emit(run.project_id, "dispatch.budget", {
               run_id: run.id,
@@ -90,13 +103,13 @@ export class Scheduler {
             ? children.map((t) => `${t.id}:${t.version}`).join(",")
             : "";
         const signature = `${task.id}:${task.claim_epoch}:${inbox.at(-1)?.id || ""}:${readiness}:${completeChildren}`;
-        if (signature === run.dispatch.last_signature) continue;
+        if (signature === dispatch.last_signature) continue;
         s.store.transaction(() => {
           run = s.run(run.id);
           s.update("run", run, {
             dispatch: {
-              ...run.dispatch,
-              launches: run.dispatch.launches + 1,
+              ...dispatch,
+              launches: dispatch.launches + 1,
               last_signature: signature,
               last_error: null,
             },
@@ -104,7 +117,7 @@ export class Scheduler {
           s.emit(run.project_id, "dispatch.started", {
             run_id: run.id,
             task_id: task.id,
-            summary: `自动执行 ${task.short_id}（${run.dispatch.launches + 1}/${run.dispatch.max_launches}）`,
+            summary: `自动执行 ${task.short_id}（${dispatch.launches + 1}/${dispatch.max_launches}）`,
           });
         });
         try {
@@ -114,21 +127,21 @@ export class Scheduler {
             const latest = s.run(run.id);
             s.update("run", latest, {
               dispatch: {
-                ...latest.dispatch,
+                ...(latest.dispatch || dispatch),
                 enabled: false,
-                last_error: error.message,
+                last_error: errorInfo(error).message,
               },
             });
             s.emit(run.project_id, "dispatch.failed", {
               run_id: run.id,
               task_id: task.id,
-              summary: error.message,
+              summary: errorInfo(error).message,
             });
           });
         }
       }
     } catch (error) {
-      console.error("Relayboard dispatcher:", error.message);
+      console.error("Relayboard dispatcher:", errorInfo(error).message);
     } finally {
       this.running = false;
     }

@@ -9,7 +9,7 @@
   "mcpServers": {
     "relayboard": {
       "command": "npx",
-      "args": ["--yes", "relayboard@0.1.1", "mcp"],
+      "args": ["--yes", "relayboard@0.3.0", "mcp"],
       "env": { "RELAYBOARD_URL": "http://127.0.0.1:4317" }
     }
   }
@@ -17,6 +17,8 @@
 ```
 
 `mcp` 仅连接共享服务，不会为每个客户端再启动一套看板；标准输出只传 MCP 协议。
+
+以下本地路径均指安装包或 `npm run build` 生成的 `lib/` JavaScript。开发源码使用 `node --import tsx bin/relayboard.ts ...`；安装包用户直接运行 `relayboard`，无需 TypeScript 运行器。
 
 ## Codex
 
@@ -34,7 +36,7 @@ url = "http://127.0.0.1:4317/mcp"
 ```toml
 [mcp_servers.relayboard]
 command = "node"
-args = ["/absolute/path/to/relayboard/bin/mcp.js"]
+args = ["/absolute/path/to/relayboard/lib/bin/mcp.js"]
 
 [mcp_servers.relayboard.env]
 RELAYBOARD_URL = "http://127.0.0.1:4317"
@@ -53,7 +55,7 @@ RELAYBOARD_URL = "http://127.0.0.1:4317"
   "mcpServers": {
     "relayboard": {
       "command": "node",
-      "args": ["/absolute/path/to/relayboard/bin/mcp.js"],
+      "args": ["/absolute/path/to/relayboard/lib/bin/mcp.js"],
       "env": { "RELAYBOARD_URL": "http://127.0.0.1:4317" }
     }
   }
@@ -67,7 +69,7 @@ RELAYBOARD_URL = "http://127.0.0.1:4317"
 可选的 `claude-checkpoint-hook.js` 接收标准输入 JSON，在 `PreCompact`/`Stop` 时导出**已经保存到服务的检查点**。按所用 Claude Code 版本的 hook 格式配置命令：
 
 ```text
-node /absolute/path/to/relayboard/integrations/claude-checkpoint-hook.js
+node /absolute/path/to/relayboard/lib/integrations/claude-checkpoint-hook.js
 ```
 
 运行环境需要 `RELAYBOARD_URL`、`RELAYBOARD_RUN_ID`、`RELAYBOARD_TASK_ID`，以及可选令牌。该 hook 不读取整段聊天，不推断未报告进度，不自动释放任务，也不声称捕获了全部原生子 agent 事件。
@@ -90,7 +92,7 @@ pi mcp list
 RELAYBOARD_URL=http://127.0.0.1:4317 \
 RELAYBOARD_RUN_ID=YOUR_RUN_ID \
 RELAYBOARD_TASK_ID=YOUR_TASK_ID \
-pi --extension /absolute/path/to/relayboard/integrations/pi-extension.js \
+pi --extension /absolute/path/to/relayboard/lib/integrations/pi-extension.js \
    --skill /absolute/path/to/relayboard/skills/task-continuity
 ```
 
