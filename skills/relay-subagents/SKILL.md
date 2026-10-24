@@ -35,3 +35,9 @@ Each child uses `work_report` on its own task and sends directed blockers, deliv
 Where native lifecycle events are unavailable, explicitly forward real child reports with their source. A relay message persists information; waking an external idle client needs a supported adapter/runner or polling. A registered or unseen child is not proof of a running/stopped process. Heartbeat observation (`self`, `parent`, `adapter`) retains provenance.
 
 Before parent handoff, handle every active descendant: preserve its task and redirect reports explicitly, or stop/release it with exit evidence. Never release a subtree solely because the parent chat ended. Independent acceptance follows child submission. After required children are accepted and their exact changes are integrated, record fresh coordinator verification.
+
+## Project memory and patrol
+
+Use `relay_memory_search` for relevant project lessons, then `relay_memory_get` by ID/version for evidence. Summaries omit full bodies; avoid loading the whole library or old conversation. Save reusable verified facts, runbooks and failed approaches with `relay_memory_save`, source and evidence; exclude credentials. Current project constraints and decisions take precedence over memory. `relay_memory_sources` lists explicit remote libraries; only send a focused query via `relay_memory_remote_search` when appropriate.
+
+When a patrol reminder arrives, read `work_next` and report actual progress or a specific blocker. Heartbeat and log output do not resolve a stall. Replacement Runs still recover files and report every native descendant separately. `relay_supervisor_status` explains reminders, recovery attempts and budgets; failed client login or tool approval needs configuration, not repeated blind relaunches.

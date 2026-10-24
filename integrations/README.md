@@ -9,7 +9,7 @@
   "mcpServers": {
     "relayboard": {
       "command": "npx",
-      "args": ["--yes", "relayboard@0.4.0", "mcp"],
+      "args": ["--yes", "relayboard@0.6.0", "mcp"],
       "env": { "RELAYBOARD_URL": "http://127.0.0.1:4317" }
     }
   }
@@ -166,3 +166,14 @@ pi --extension /absolute/path/to/relayboard/lib/integrations/pi-extension.js \
 ## 自主协作的边界
 
 活动 agent 可以通过 MCP 自行选择任务、提议拆分和交换消息。网页“自动接任务”显式启用有次数预算的本地 CLI 调度；新消息和依赖完成可触发后续执行，相同检查点不会导致反复启动。外部空闲窗口需自行读收件箱或使用相应适配能力。原生生命周期事件因工具、版本和插件而异，服务不假装拥有未接入的事件。
+
+
+## 项目记忆与大总管
+
+先用 `memory_search {project_id, query, max_chars}` 检索短摘要，再按返回的 `memory_id/version` 用 `memory_get` 补读来源和证据；翻页遵循 `next_offset`。任务包只附带少量相关或置顶摘要。`memory_save` 保存可复用的已核实经验，更新必须带当前版本；历史版本由 `memory_history` 读取。过期和归档内容默认不参与搜索，记忆不替代现行任务契约。
+
+远程查询通过 `memory_sources`、`memory_remote_search`、`memory_remote_get`，仅连接数据目录 `memory-remotes.json` 中显式配置的 Relayboard/兼容记忆 API。来源认证通过环境变量；不会自动同步本地任务或上传文件。远程结果需显式 `memory_save` 才成为本地记忆。配置示例见 [README](../README.md)。
+
+服务启动后每15秒巡视全部项目及子孙任务，默认只观察。`supervisor_status` 查看原因、提醒、尝试次数及新Run；`supervisor_configure` 按项目选择提醒或恢复模式，并设置宽限、冷却、客户端顺序与执行预算。更改策略保留已用预算，`reset_budget` 才显式重置。`supervisor_handle` 可暂缓或重新检查，均不宣告旧进程已停止。
+
+提醒写入收件箱；已启用的Run调度可响应新消息，外部闲置会话需要轮询或客户端适配。恢复建立独立新Run并保留检查点、层级和相关记忆；旧写入者状态未知时升级问题。停止本服务持有的托管进程需策略明确启用，并等待实际退出。服务须持续运行；机器休眠或关闭服务期间不巡视。真实模型能否继续仍依赖客户端登录、工具权限与任务本身，进程退出并不代表交付完成。

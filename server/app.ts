@@ -5,11 +5,14 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z, ZodError } from "zod";
+import { queries } from "./schemas.ts";
 import { Store } from "./store.ts";
 import { Service, AppError } from "./domain.ts";
 import { createMcp } from "./mcp.ts";
 import { Runner, createWorktree, type RunnerProfile } from "./runner.ts";
 import { Scheduler } from "./scheduler.ts";
+import { MemoryRemotes } from "./memory-remotes.ts";
+import { Supervisor } from "./supervisor.ts";
 import {
   packageRoot,
   runtimeRoot,
@@ -50,6 +53,19 @@ export function createApp({
   });
   const app = express();
   const scheduler = new Scheduler(service, runner);
+  const supervisor = new Supervisor(service, runner);
+  const memoryRemotes = new MemoryRemotes(join(dataDir, "memory-remotes.json"));
+  const query = (name: string, args: Record<string, unknown>) => {
+    if (name === "memory_sources") {
+      queries.memory_sources.parse(args);
+      return memoryRemotes.list();
+    }
+    if (name === "memory_remote_search")
+      return memoryRemotes.search(queries.memory_remote_search.parse(args));
+    if (name === "memory_remote_get")
+      return memoryRemotes.get(queries.memory_remote_get.parse(args));
+    return service.query(name, args);
+  };
   app.disable("x-powered-by");
   app.use((req, res, next) => {
     const host = (req.headers.host || "").split(":")[0];
@@ -117,7 +133,7 @@ export function createApp({
     const result = service.execute(body.operation, body.args, body.request_id);
     res.json({ result });
   });
-  app.post("/api/query", (req, res) => {
+  app.post("/api/query", async (req, res) => {
     const body = z
       .object({
         query: z.string(),
@@ -125,7 +141,7 @@ export function createApp({
       })
       .strict()
       .parse(req.body);
-    res.json({ result: service.query(body.query, body.args) });
+    res.json({ result: await query(body.query, body.args) });
   });
   app.get("/api/stream", (req, res) => {
     const project = String(req.query.project_id || "");
@@ -151,6 +167,10 @@ export function createApp({
   app.get("/api/runtimes", async (req, res) =>
     res.json({ result: await runner.availability(req.query.refresh === "1") }),
   );
+  app.post("/api/supervisor/scan", async (req, res) => {
+    await supervisor.tick();
+    res.json({ result: service.query("supervisor_status", {}) });
+  });
   app.get("/api/runner/status", async (req, res) =>
     res.json({ result: await runner.status(req.query.refresh === "1") }),
   );
@@ -270,7 +290,7 @@ export function createApp({
         .json({ error: "Stateless MCP endpoint; use POST" });
     const server = createMcp({
       command: (op, args, id) => service.execute(op, args, id),
-      query: (q, args) => service.query(q, args),
+      query,
     });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
@@ -335,8 +355,10 @@ export function createApp({
     service,
     runner,
     scheduler,
+    supervisor,
     close: async () => {
       scheduler.stop();
+      await supervisor.close();
       await runner.close();
       store.close();
     },

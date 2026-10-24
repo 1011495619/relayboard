@@ -8,18 +8,18 @@
 
 需要 Node.js 24+。安装包已包含构建好的网页，首次运行由 npx 安装运行依赖，启动时自动打开看板。
 
-当前尚未发布到 npm。下载 `relayboard-0.4.1.tgz`，在下载目录运行：
+当前尚未发布到 npm。下载 `relayboard-0.6.0.tgz`，在下载目录运行：
 
 ```bash
-npx --yes --package=./relayboard-0.4.1.tgz relayboard
+npx --yes --package=./relayboard-0.6.0.tgz relayboard
 ```
 
 服务启动后保留终端，按 Ctrl+C 停止。再次运行会识别已有 Relayboard 并打开同一看板。
 
 ```bash
 # 改端口、指定数据目录或关闭自动开浏览器
-npx --yes --package=./relayboard-0.4.1.tgz relayboard --port 4320 --no-open
-npx --yes --package=./relayboard-0.4.1.tgz relayboard --data-dir /absolute/path/to/data
+npx --yes --package=./relayboard-0.6.0.tgz relayboard --port 4320 --no-open
+npx --yes --package=./relayboard-0.6.0.tgz relayboard --data-dir /absolute/path/to/data
 ```
 
 发布到 npm 后，公开安装入口就是以下命令；发布前请使用上面的本地包：
@@ -97,6 +97,50 @@ RELAYBOARD_RUNNERS=1 npm start
 
 源码内部相对导入使用 `.ts`，TypeScript 的 `rewriteRelativeImportExtensions` 在编译产物中转换为 `.js`。第三方包如 MCP SDK 的 `.../index.js` 是其正式导出路径，保留原样。npm 包继续运行 `lib/` 编译产物，使用者无需 TypeScript 运行器。
 
+## 项目记忆与远程记忆库
+
+侧栏「项目记忆」可记录和检索事实、决定背景、操作手册、失败经验及参考资料。每条有摘要、正文、标签、任务关联、来源版本、证据和可选有效期；修改须提交当前版本，历史保留。过期、待核实与归档记忆默认不参与检索和接手摘要。
+
+接手包最多附带 5 条相关/置顶记忆的短摘要，总体约 1200 字符；正文通过 `memory_get` 按 ID/版本补读。搜索支持中文词组，返回有字符预算的摘要页和 `next_offset`，不会加载整个知识库。这里减少的是重复上下文，不承诺固定 token 节省比例；复杂判断依然由执行者完成。任务检查点、契约决定和项目记忆用途不同，历史记忆始终服从当前目标、约束与任务契约。
+
+远程库使用另一个 Relayboard 实例的记忆查询 API，或兼容该协议的服务。在本机**数据目录**添加 `memory-remotes.json`：
+
+```json
+[
+  {
+    "name": "team",
+    "label": "团队知识库",
+    "url": "https://memory.example.com",
+    "project_id": "prj_TEAM_LIBRARY",
+    "token_env": "TEAM_MEMORY_TOKEN"
+  }
+]
+```
+
+来源须用 HTTPS；本机回环 HTTP 可用于端口隧道。设置 `TEAM_MEMORY_TOKEN` 后启动本机 Relayboard，来源配置按查询重读，环境变量变更需重启。服务本身默认只监听本机，跨机器连接需自行提供受保护的 HTTPS 入口或本机隧道。命名来源固定远端项目，令牌使用远端服务配置；不会把本机的服务令牌发送给远端。
+
+在网页选择来源并检索，或调用 `memory_sources` → `memory_remote_search` → `memory_remote_get`。只发送明确的搜索词，不自动上传任务、文件、聊天或整库；不要在检索词中填写凭据。远程错误与来源身份明确显示，本地记忆独立可用。远程内容只有经「保存到当前项目」或显式 `memory_save` 后才进入本地记忆。此版本不包含 Mem0/Qdrant 专用适配器或双向数据库同步。
+
+## 项目大总管
+
+服务运行期间每 15 秒巡视所有项目及任意层级子任务。巡视使用本地规则和持久状态；只在有待处理恢复动作时启动模型。默认仅观察，不常驻一个不断消耗 token 的模型会话。
+
+「项目大总管」展示全项目的问题、首次发现、提醒、尝试、新 Run 与处理结论。可切换范围、立即巡视、暂缓问题或在原因排除后重新检查。项目策略彼此独立：
+
+| 策略 | 行为 |
+| --- | --- |
+| 仅观察 | 记录长期未保存进度、负责人结束、进程退出等情况 |
+| 提醒负责人 | 发送一次持久任务请求；原负责人已结束时优先提醒上层负责人，否则保存在项目中 |
+| 自动接手续跑 | 提醒后等待宽限期，检查预算与进程状态，再按配置顺序选择本机就绪 CLI，登记新 Run、交接并启动 |
+
+执行预算包含项目总次数、每任务尝试次数和冷却时间。普通策略编辑保留已用次数，重置须明确勾选；失败升级后须核实原因并「重新检查」。客户端版本检测不证明账户和工具审批可用。若登录、权限或命令失败，保留诊断与任务状态，避免无限重试。原生模型测试与受控进程测试分别记录在 VALIDATION.md。
+
+新的执行者保留实际父 Run、范围、能力及分工关系，携带任务检查点、有序步骤、失败尝试、相关记忆和成果；旧执行权版本失效。子孙任务分别巡视；协调任务等待子任务时不会当作停滞写入者。心跳、日志和进程退出 0 不代表任务进展或交付。
+
+只有已知退出/停止的托管进程，或明确结束的外部会话，才能在同目录自动交接。未知旧进程需人工核实。可显式允许停止本服务仍托管且长期无进展的进程；先请求停止，观察实际退出，再创建接手者。服务重启后原托管进程标为待核实，巡视不会据此猜测旧写入已经结束。多实例通过 SQLite 事务去重提醒与恢复预留；启动结果未知时保留预算并要求核实，避免重复创建模型执行。
+
+提醒能触发**已启用 Run 自动执行**的本地调度器；外部聊天窗口需主动轮询或使用客户端扩展。它不控制任意应用窗口。客户端原有的登录、文件/终端权限和 MCP 审批保持不变。服务停止期间不巡视，重启后从 SQLite 继续；可用你现有的进程管理工具保持服务常驻。
+
 ## 网页使用
 
 1. 创建项目，填写目标、用户约束和实际代码目录；示例项目不会启动 AI。
@@ -141,7 +185,7 @@ Claude Code / 支持 MCP 的 pi 使用通用 stdio 配置：
 
 ## 协作 Skill
 
-随附 7 个可单独加载的 Skill，网页“协作 Skills”可阅读完整流程、复制调用提示和文件路径。
+随附 8 个可单独加载的 Skill，网页“协作 Skills”可阅读完整流程、复制调用提示和文件路径。
 
 | Skill | 用途 |
 | --- | --- |
@@ -152,6 +196,7 @@ Claude Code / 支持 MCP 的 pi 使用通用 stdio 配置：
 | `relay-review` | 独立验收和协调任务集成验证 |
 | `git-commit-style` | 单一目的提交、中文原因和统一标题格式 |
 | `relay-handoff` | 停止旧写入、交接和现场核验 |
+| `relay-supervisor` | 处理巡视提醒、核实旧进程、按预算恢复和升级问题 |
 
 将所需 Skill 的整个目录放入客户端支持的技能目录，或让执行者直接读取对应 `SKILL.md`。Codex 常用 `~/.codex/skills/`，Claude Code 常用 `~/.claude/skills/`，pi 常用 `~/.pi/agent/skills/`。`task-continuity` 保留完整流程作为按需引用，单独安装也可使用；其他角色 Skill 的核心规则自包含。
 
@@ -246,7 +291,7 @@ JSON
 
 ## 托管执行
 
-登记并领取任务后，可显式启动本机的 Codex、Claude Code 或 pi CLI。运行器传入有长度预算的接手包、环境中的项目服务地址和任务身份；保留 JSONL/文本日志，记录进程句柄与退出结果。默认每次最多运行 20 分钟，到时请求终止。
+登记并领取任务后，可显式启动客户端目录中已安装就绪的 CLI，例如 Codex、Claude Code 或 pi。运行器传入有长度预算的接手包、环境中的项目服务地址和任务身份；保留 JSONL/文本日志，记录进程句柄与退出结果。默认每次最多运行 20 分钟，到时请求终止。
 
 ```bash
 node lib/bin/relayboard.js run RUN_ID TASK_ID
@@ -302,7 +347,7 @@ npm run web:dev     # 另一个终端保留 npm start；Vite 在 5173 代理本�
 ```bash
 npm pack --pack-destination /absolute/path/to/releases
 # 核对包内容和发布身份后，发布已经验证过的同一个包：
-npm publish /absolute/path/to/releases/relayboard-0.4.1.tgz --access public --registry=https://registry.npmjs.org
+npm publish /absolute/path/to/releases/relayboard-0.6.0.tgz --access public --registry=https://registry.npmjs.org
 ```
 
 本项目尚未公开发布到 npm。安装包验证结果以对应版本的 `VALIDATION.md` 为准；发布者需使用有包名发布权限的 npm 账号。
@@ -346,3 +391,11 @@ refactor(protocol): 关联命令输入和返回类型
 ```
 
 标题格式 `类型(范围): 简述`，不超过 50 字符；空行后用中文解释为什么，避免列举文件。类型仅用 `feat`、`fix`、`refactor`、`docs`；每个 commit 只做一件事。执行者在看板记录提交哈希和实际验证，独立验收者检查差异与证据。
+
+
+## 后续值得优先验证的方向
+
+- 客户端原生事件适配：逐版本验证子 Agent 创建、压缩前检查点和闲置消息唤醒，让手工登记更少。
+- 记忆效果评估：用真实接手任务比较首次成功率、补读次数、重复失败和上下文用量，再决定是否增加语义检索或其他记忆服务适配器。
+- 大规模巡视：项目增多后测量每轮耗时与 SQLite 查询成本，再添加索引、增量扫描与分级通知。
+- 建议式改进：从有证据的失败记录产生待评审任务，保留版本与回滚；自动生成建议和实际执行继续通过任务契约及策略衔接。

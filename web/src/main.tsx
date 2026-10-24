@@ -152,6 +152,8 @@ import {
 } from "../../server/runtimes.ts";
 import { AgentIcon } from "./components/agent-icon";
 import { AgentCatalog } from "./components/agent-catalog";
+import { ProjectMemoryView } from "./components/project-memory.tsx";
+import { SupervisorView } from "./components/supervisor-view.tsx";
 import "./style.css";
 class ApiError extends Error {
   code?: string;
@@ -235,9 +237,12 @@ const icons: Record<string, LucideIcon> = {
   settings: Settings2,
   clients: Terminal,
   skills: BookOpen,
+  memory: BookOpen,
+  supervisor: Activity,
 };
 const navItems = [
   ["home", "关注事项"],
+  ["supervisor", "项目大总管"],
   ["board", "任务看板"],
   ["join", "领取工作"],
   ["agents", "执行者树"],
@@ -245,6 +250,7 @@ const navItems = [
   ["discussions", "消息与决定"],
   ["activity", "活动记录"],
   ["skills", "协作 Skills"],
+  ["memory", "项目记忆"],
   ["clients", "Agent 接入"],
   ["settings", "项目与接入"],
 ];
@@ -1370,6 +1376,33 @@ function App() {
                   integration={loadIntegration}
                   notify={notify}
                   register={(runtime) => setModal({ kind: "agent", runtime })}
+                />
+              )}
+              {view === "memory" && (
+                <ProjectMemoryView
+                  key={project.id}
+                  projectId={project.id}
+                  tasks={tasks}
+                  query={query}
+                  command={command}
+                  notify={notify}
+                />
+              )}
+              {view === "supervisor" && (
+                <SupervisorView
+                  key={project.id}
+                  project={project}
+                  projects={projects}
+                  tasks={tasks}
+                  query={query}
+                  command={command}
+                  scan={() => api("/supervisor/scan", {})}
+                  notify={notify}
+                  openTask={openTask}
+                  openProject={(id) => {
+                    setProjectId(id);
+                    setView("board");
+                  }}
                 />
               )}
               {view === "settings" && (

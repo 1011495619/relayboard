@@ -5,3 +5,5 @@ Read the assigned Relayboard task and context before editing. Prefer work_start 
 The source is strict TypeScript. Run `npm run check` before delivery; published packages contain compiled JavaScript in `lib/` and web assets in `dist/`. Preserve stored data and existing coordination invariants.
 
 When committing or writing commit messages, apply `skills/git-commit-style/SKILL.md`: title `类型(范围): 简述`, at most 50 characters; blank line; Chinese body explaining why, without enumerating files. Types: `feat`, `fix`, `refactor`, `docs`. One purpose per commit. Do not include another writer’s changes or runtime databases. Record hashes and test evidence on the board.
+
+Search project memory on demand; read full evidence at the returned ID/version before relying on a summary. Save reusable verified facts with source and evidence, excluding secrets. Historical memory does not replace current task contracts. Supervisor reminders require actual progress or a concrete blocker report; they do not prove that any writer stopped. Default observation creates no model requests. Explicit recovery policies retain per-project and per-task budgets.

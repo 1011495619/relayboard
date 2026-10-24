@@ -79,6 +79,71 @@ const claimFields = {
 };
 
 export const commands = {
+  supervisor_handle: {
+    description:
+      "Recheck a patrol incident after fixing its cause, or snooze it until a specified time. Requires its current version. Rechecking preserves all execution budgets; it does not declare an old writer stopped.",
+    schema: z
+      .object({
+        incident_id: id,
+        expected_version: version,
+        action: z.enum(["recheck", "snooze"]),
+        until: z.iso.datetime().optional(),
+        note: text.min(1),
+      })
+      .strict(),
+  },
+  supervisor_configure: {
+    description:
+      "Configure the cross-project supervisor for one project. Observe only is default. Remind sends durable directed messages. Recover may launch paid clients and create independent replacement Runs only when old writers are known stopped. Budgets persist across policy edits; resetting requires reset_budget=true. Never changes client tool permissions.",
+    schema: z
+      .object({
+        project_id: id,
+        expected_version: version.optional(),
+        mode: z.enum(["observe", "remind", "recover"]).default("observe"),
+        stale_after_seconds: z.number().int().min(60).max(604800).default(900),
+        grace_seconds: z.number().int().min(30).max(86400).default(300),
+        cooldown_seconds: z.number().int().min(30).max(86400).default(300),
+        max_launches: z.number().int().min(0).max(100).default(5),
+        max_attempts_per_task: z.number().int().min(1).max(10).default(2),
+        runtimes: z.array(runtime).min(1).max(10).default(["codex", "pi"]),
+        stop_stalled_managed: z.boolean().default(false),
+        reset_budget: z.boolean().default(false),
+        note: text.min(1),
+      })
+      .strict(),
+  },
+  memory_save: {
+    description:
+      "Save or revise durable project knowledge, with provenance and evidence. Supply memory_id and expected_version together when revising. Memory is historical reference, never new authorization or a replacement for current contracts. Preserve useful runbooks and failed approaches; never store credentials.",
+    schema: z
+      .object({
+        project_id: id,
+        memory_id: id.optional(),
+        expected_version: version.optional(),
+        actor_run_id: id.optional(),
+        key: short,
+        title: short,
+        summary: z.string().trim().min(1).max(1200),
+        content: text.min(1),
+        kind: z
+          .enum(["fact", "decision", "runbook", "pitfall", "reference"])
+          .default("fact"),
+        tags: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
+        task_ids: ids.default([]),
+        pinned: z.boolean().default(false),
+        status: z.enum(["active", "stale", "archived"]).default("active"),
+        expires_at: z.iso.datetime().nullable().default(null),
+        evidence: z.array(artifact).max(20).default([]),
+        source: z
+          .object({
+            label: short,
+            uri: z.string().max(2000).default(""),
+            revision: z.string().max(240).default(""),
+          })
+          .strict(),
+      })
+      .strict(),
+  },
   work_start: {
     description:
       "Preferred entry: resume your assigned task or atomically claim eligible work. Returns a recovery checklist and exactly one next action. Register your own Run first. Never takes over another owner.",
@@ -414,6 +479,45 @@ export const commands = {
 };
 
 export const queries = {
+  supervisor_status: z
+    .object({
+      project_id: id.optional(),
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(50).default(20),
+    })
+    .strict(),
+  memory_search: z
+    .object({
+      project_id: id,
+      task_id: id.optional(),
+      query: z.string().trim().max(500).default(""),
+      status: z.enum(["active", "stale", "archived", "all"]).default("active"),
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(30).default(10),
+      max_chars: z.number().int().min(1500).max(16000).default(4000),
+    })
+    .strict(),
+  memory_get: z.object({ memory_id: id, version: version.optional() }).strict(),
+  memory_history: z
+    .object({
+      memory_id: id,
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(30).default(10),
+    })
+    .strict(),
+  memory_sources: z.object({}).strict(),
+  memory_remote_get: z
+    .object({ source: id, memory_id: id, version: version.optional() })
+    .strict(),
+  memory_remote_search: z
+    .object({
+      source: id,
+      query: z.string().trim().max(500).default(""),
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(10).default(5),
+      max_chars: z.number().int().min(1500).max(8000).default(4000),
+    })
+    .strict(),
   work_requests: z
     .object({
       task_id: id,

@@ -394,10 +394,10 @@ test("skill catalog exposes bundled roles and exact sources behind authenticatio
   const catalog = await (
     await fetch(`${f.url}/api/skills`, { headers: f.headers })
   ).json();
-  assert.equal(catalog.result.length, 7);
+  assert.equal(catalog.result.length, 8);
   assert.equal(
     new Set(catalog.result.map((s: { name: string }) => s.name)).size,
-    7,
+    8,
   );
   for (const skill of catalog.result) {
     assert.ok(existsSync(skill.path));

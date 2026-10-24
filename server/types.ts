@@ -24,6 +24,85 @@ export interface VersionedRecord {
   created_at: string;
   updated_at?: string;
 }
+export interface SupervisorPolicy
+  extends
+    VersionedRecord,
+    Omit<
+      CommandArgs<"supervisor_configure">,
+      "expected_version" | "reset_budget"
+    > {
+  launches: number;
+}
+export interface SupervisorIncident extends VersionedRecord {
+  project_id: string;
+  task_id: string;
+  owner_run_id: string | null;
+  progress_signature: string;
+  reason: string;
+  status: "open" | "recovering" | "escalated" | "resolved";
+  first_seen_at: string;
+  notified_at: string | null;
+  last_action_at: string | null;
+  message_id: string | null;
+  attempts: number;
+  replacement_run_id: string | null;
+  resolution: string;
+  snoozed_until?: string | null;
+}
+export interface SupervisorState extends VersionedRecord {
+  project_id: string;
+  task_id: string;
+  signature: string;
+  progress_at: string;
+  attempts: number;
+  last_attempt_at: string | null;
+}
+export interface SupervisorStatus {
+  policies: SupervisorPolicy[];
+  incidents: (SupervisorIncident & {
+    task_title: string;
+    task_short_id: string;
+    project_name: string;
+  })[];
+  total: number;
+  next_offset: number | null;
+  notice: string;
+}
+export interface ProjectMemory
+  extends
+    VersionedRecord,
+    Omit<CommandArgs<"memory_save">, "memory_id" | "expected_version"> {
+  updated_at: string;
+  origin: "local";
+}
+export interface MemoryRevision extends ProjectMemory {
+  memory_id: string;
+}
+export interface MemorySearchResult {
+  items: (Omit<ProjectMemory, "content" | "evidence"> & {
+    evidence_count: number;
+    content_chars: number;
+    score: number;
+  })[];
+  total: number;
+  next_offset: number | null;
+  truncated: boolean;
+  max_chars: number;
+  notice: string;
+}
+export interface MemorySourceInfo {
+  name: string;
+  label: string;
+  project_id: string;
+  token_configured: boolean;
+}
+export interface RemoteMemoryResult {
+  source: string;
+  label: string;
+  result: MemorySearchResult | null;
+  error: string | null;
+  notice: string;
+}
 export interface Project
   extends VersionedRecord, CommandArgs<"project_create"> {
   project_id?: never;
@@ -186,6 +265,11 @@ export interface RelayEvent {
   [field: string]: unknown;
 }
 export interface RecordMap {
+  supervisor_policy: SupervisorPolicy;
+  supervisor_incident: SupervisorIncident;
+  supervisor_state: SupervisorState;
+  memory: ProjectMemory;
+  memory_revision: MemoryRevision;
   project: Project;
   agent: Agent;
   run: Run;
@@ -296,6 +380,32 @@ export interface WorkGuide {
   }[];
 }
 export interface QueryResults {
+  supervisor_status: SupervisorStatus;
+  memory_search: MemorySearchResult;
+  memory_get: ProjectMemory;
+  memory_history: {
+    items: Pick<
+      ProjectMemory,
+      | "id"
+      | "version"
+      | "title"
+      | "summary"
+      | "status"
+      | "updated_at"
+      | "source"
+    >[];
+    total: number;
+    next_offset: number | null;
+  };
+  memory_sources: MemorySourceInfo[];
+  memory_remote_search: RemoteMemoryResult;
+  memory_remote_get: {
+    source: string;
+    label: string;
+    memory: ProjectMemory | null;
+    error: string | null;
+    notice: string;
+  };
   work_next: WorkGuide;
   work_requests: {
     items: Message[];
@@ -318,6 +428,9 @@ export interface QueryResults {
   context: ContextPacket;
 }
 export interface CommandResults {
+  supervisor_handle: SupervisorIncident;
+  supervisor_configure: SupervisorPolicy;
+  memory_save: ProjectMemory;
   work_start: WorkGuide;
   work_report: WorkGuide;
   project_create: Project;

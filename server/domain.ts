@@ -17,6 +17,19 @@ import {
   pendingRequests,
 } from "./workflow.ts";
 import { observeWorkspace } from "./workspace.ts";
+import {
+  saveMemory,
+  searchMemory,
+  getMemory,
+  memoryHistory,
+  memoryContext,
+} from "./memory.ts";
+import {
+  configureSupervisor,
+  supervisorStatus,
+  handleIncident,
+} from "./supervisor.ts";
+import { supportsLaunch } from "./runtimes.ts";
 import { commands, queries } from "./schemas.ts";
 import type {
   CommandName,
@@ -477,6 +490,23 @@ export class Service {
   query(name: string, input: unknown = {}): QueryResults[QueryName] {
     const schema = queries[name as QueryName];
     if (!schema) throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
+    if (name === "supervisor_status")
+      return supervisorStatus(this, queries.supervisor_status.parse(input));
+    if (name === "memory_search")
+      return searchMemory(this, queries.memory_search.parse(input));
+    if (name === "memory_get")
+      return getMemory(this, queries.memory_get.parse(input));
+    if (name === "memory_history")
+      return memoryHistory(this, queries.memory_history.parse(input));
+    if (name === "memory_sources") {
+      queries.memory_sources.parse(input);
+      return [];
+    }
+    if (name === "memory_remote_search" || name === "memory_remote_get")
+      throw new AppError(
+        "MEMORY_TRANSPORT_REQUIRED",
+        "远程记忆需要通过运行中的 HTTP 或 stdio MCP 服务查询",
+      );
     if (name === "work_requests") {
       const args = queries.work_requests.parse(input),
         task = this.task(args.task_id),
@@ -1123,7 +1153,7 @@ export class Service {
   ): CommandResults["run_dispatch"] {
     const run = this.run(args.run_id);
     ensure(
-      ["codex", "claude", "pi"].includes(run.runtime) && !!run.workdir,
+      supportsLaunch(run.runtime) && !!run.workdir,
       "DISPATCH_RUNTIME",
       "自动执行需要可启动的 CLI 工具和实际工作目录",
     );
@@ -1966,6 +1996,19 @@ export class Service {
     });
     return decision;
   }
+  supervisor_configure(
+    args: CommandArgs<"supervisor_configure">,
+  ): CommandResults["supervisor_configure"] {
+    return configureSupervisor(this, args);
+  }
+  supervisor_handle(
+    args: CommandArgs<"supervisor_handle">,
+  ): CommandResults["supervisor_handle"] {
+    return handleIncident(this, args);
+  }
+  memory_save(args: CommandArgs<"memory_save">): CommandResults["memory_save"] {
+    return saveMemory(this, args);
+  }
   context(args: QueryArgs<"context">): ContextPacket {
     const task = this.task(args.task_id),
       project = this.get("project", task.project_id);
@@ -2036,6 +2079,8 @@ export class Service {
       parts[6],
       ...parts.slice(9),
     ];
+    const memory = memoryContext(this, task);
+    if (memory) priority.splice(9, 0, memory);
     const requests = pendingRequests(this, task);
     if (requests.length) {
       if (requests.length > 5)
@@ -2060,7 +2105,7 @@ export class Service {
     if (body.length > args.max_chars) omissions.push("接手包达到长度预算");
     if (omissions.length) {
       const footer =
-        "\n\n[此包包含省略。行动前使用 relay_project 读取完整目标与用户约束，relay_task 读取当前任务，relay_decisions 按需读取相关决定。]";
+        "\n\n[此包包含省略。行动前使用 relay_project 读取完整目标与用户约束，relay_task 读取当前任务，relay_decisions 按需读取相关决定；项目记忆按需 relay_memory_search/get。]";
       body = body.slice(0, args.max_chars - footer.length) + footer;
     }
     return {

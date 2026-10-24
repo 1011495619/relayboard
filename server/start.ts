@@ -91,6 +91,7 @@ export async function startServer({
   instance.runner.baseUrl = url;
   instance.runner.recover();
   instance.scheduler.start();
+  instance.supervisor.start();
   log(
     `Relayboard ${url}\nMCP ${url}/mcp\n数据：${actualDataDir}\n按 Ctrl+C 停止服务，任务记录会保留。`,
   );

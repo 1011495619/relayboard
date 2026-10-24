@@ -36,3 +36,9 @@ Apply [git-commit-style](../git-commit-style/SKILL.md): `类型(范围): 简述`
 Verification results reported by an agent remain self-reported even when the service observes the Git revision. Verify the intended version, then submit. A different Run or the human accepts. When transferring unfinished work, checkpoint and handle old writers/descendants before explicit handoff.
 
 On older services without work tools, use `relay_eligible` → `relay_task_claim` → `relay_task_checkpoint` → `relay_task_submit`, retaining latest `expected_version` and returned `claim_epoch`; transferred tasks require `relay_task_reconcile`. Discover schemas first.
+
+## Project memory and patrol
+
+Use `relay_memory_search` for relevant project lessons, then `relay_memory_get` by ID/version for evidence. Summaries omit full bodies; avoid loading the whole library or old conversation. Save reusable verified facts, runbooks and failed approaches with `relay_memory_save`, source and evidence; exclude credentials. Current project constraints and decisions take precedence over memory. `relay_memory_sources` lists explicit remote libraries; only send a focused query via `relay_memory_remote_search` when appropriate.
+
+When a patrol reminder arrives, read `work_next` and report actual progress or a specific blocker. Heartbeat and log output do not resolve a stall. Replacement Runs still recover files and report every native descendant separately. `relay_supervisor_status` explains reminders, recovery attempts and budgets; failed client login or tool approval needs configuration, not repeated blind relaunches.
