@@ -86,11 +86,13 @@ export function ExecutionGuide({
   loadGuide,
   onContext,
   onCopied,
+  runNames,
 }: {
   task: Task;
   loadGuide: (taskId: string, runId: string) => Promise<WorkGuide>;
   onContext: () => void;
   onCopied: () => void;
+  runNames: Record<string, string>;
 }) {
   const [guide, setGuide] = useState<WorkGuide | null>(null);
   const [loading, setLoading] = useState(false);
@@ -235,6 +237,15 @@ export function ExecutionGuide({
               </AlertDescription>
             </Alert>
           )}
+          {guide.truncated && (
+            <Alert>
+              <AlertCircle />
+              <AlertDescription>
+                当前指引包含省略（字符预算 {guide.char_budget}）：
+                {guide.omissions.join("；")}。按引用补读完整记录后再执行。
+              </AlertDescription>
+            </Alert>
+          )}
           {guide.context?.truncated && (
             <Alert>
               <AlertCircle />
@@ -244,15 +255,58 @@ export function ExecutionGuide({
               </AlertDescription>
             </Alert>
           )}
-          {guide.dependencies.length > 0 && (
+          {(guide.messages.length > 0 || guide.request_page.total > 0) && (
+            <details className="execution-instructions">
+              <summary>待处理请求与阻塞 · {guide.request_page.total}</summary>
+              <div className="execution-instructions-body">
+                <p>
+                  这里仅展示消息。确认收到只表示已读；执行者实际处理后，通过 MCP
+                  relay_message_resolve 提交处理说明。原收件人可能属于旧会话。
+                </p>
+                {guide.messages.map((message) => (
+                  <div className="execution-request" key={message.id}>
+                    <Badge
+                      variant={
+                        message.kind === "blocker" ? "destructive" : "outline"
+                      }
+                    >
+                      {message.kind === "blocker" ? "阻塞" : "协作请求"}
+                    </Badge>
+                    <p>{message.body}</p>
+                    <p className="muted">
+                      原收件人：
+                      {message.to_run_id
+                        ? runNames[message.to_run_id] || message.to_run_id
+                        : "项目协作成员"}{" "}
+                      ·{" "}
+                      {message.acknowledged_at
+                        ? "已读，尚未处理"
+                        : "尚未确认收到"}
+                    </p>
+                    <code>{message.id}</code>
+                  </div>
+                ))}
+                {guide.request_page.next_offset !== null && (
+                  <p>
+                    还有请求未显示。调用 relay_work_requests，task_id 为{" "}
+                    {task.id}，offset 为 {guide.request_page.next_offset}
+                    ，分页读取完整消息。
+                  </p>
+                )}
+              </div>
+            </details>
+          )}
+          {(guide.dependencies.length > 0 ||
+            guide.dependency_page.total > 0) && (
             <details className="execution-instructions">
               <summary>
-                前置成果接收情况 ·{" "}
+                前置成果接收情况 · 共 {guide.dependency_page.total}{" "}
+                项（本页已接收{" "}
                 {
                   guide.dependencies.filter((dependency) => dependency.received)
                     .length
-                }
-                /{guide.dependencies.length}
+                }{" "}
+                项）
               </summary>
               <ul className="execution-dependencies">
                 {guide.dependencies.map((dependency) => (
@@ -275,6 +329,13 @@ export function ExecutionGuide({
                   </li>
                 ))}
               </ul>
+              {guide.dependency_page.next_offset !== null && (
+                <p className="execution-evidence-note">
+                  还有前置成果未显示。调用 relay_work_dependencies，task_id 为{" "}
+                  {task.id}，offset 为 {guide.dependency_page.next_offset}
+                  ，读取完整 revision 后核对接收。
+                </p>
+              )}
             </details>
           )}
           {guide.decisions.length > 0 && (

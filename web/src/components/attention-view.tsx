@@ -44,6 +44,23 @@ function attention(task: Task, data: Snapshot) {
       reason:
         "原执行会话已结束或状态待核实。先确认旧写入情况，再决定恢复或交接。",
     };
+  if (task.workflow?.uncertain_actions.length)
+    return {
+      label: "核实未知结果",
+      reason: task.workflow.uncertain_actions[0],
+    };
+  if (
+    task.owner_run_id &&
+    ["doing", "blocked"].includes(task.status) &&
+    (data.attention
+      ? data.attention.recovery_task_ids.includes(task.id)
+      : !task.workflow || task.workflow.recovered_epoch !== task.claim_epoch)
+  )
+    return {
+      label: "恢复工作现场",
+      reason:
+        "当前执行权尚未完成恢复核验。先读取契约并确认文件、进程与前置成果。",
+    };
   return null;
 }
 
@@ -68,6 +85,21 @@ export function AttentionView({
   const proposals = data.proposals.filter(
     (proposal) => proposal.status === "pending",
   );
+  const requests = data.messages.filter(
+    (message) =>
+      !message.system &&
+      ["request", "blocker"].includes(message.kind) &&
+      !message.resolved_at,
+  );
+  const requestTotal = data.attention?.requests_total ?? requests.length;
+  const omittedRequests = Object.entries(
+    data.attention?.request_counts ?? {},
+  ).flatMap(([taskId, count]) => {
+    const visible = requests.filter(
+      (message) => (message.task_id || "project") === taskId,
+    ).length;
+    return count > visible ? [{ taskId, count: count - visible }] : [];
+  });
   const completed = data.tasks.filter(
     (task) => task.mode === "execute" && task.status === "done",
   );
@@ -96,7 +128,7 @@ export function AttentionView({
         <div className="attention-section-heading">
           <h2 id="attention-title">现在需要处理</h2>
           <Badge variant="secondary">
-            {needsAttention.length + proposals.length}
+            {needsAttention.length + proposals.length + requestTotal}
           </Badge>
         </div>
         {needsAttention.map(({ task, label, reason }) => {
@@ -132,6 +164,70 @@ export function AttentionView({
             </button>
           );
         })}
+        {requests.map((message) => {
+          const task = data.tasks.find((item) => item.id === message.task_id);
+          const recipient = data.runs.find(
+            (run) => run.id === message.to_run_id,
+          );
+          return (
+            <button
+              className="attention-row"
+              key={message.id}
+              onClick={() => (task ? openTask(task) : openDiscussions())}
+            >
+              <AlertCircle className="attention-row-icon" aria-hidden="true" />
+              <div className="attention-row-content">
+                <div className="attention-row-title">
+                  <span className="task-id">
+                    {task?.short_id || "项目请求"}
+                  </span>
+                  <strong>
+                    {message.kind === "blocker"
+                      ? "待处理阻塞消息"
+                      : "待处理协作请求"}
+                  </strong>
+                </div>
+                <p>{message.body}</p>
+                <span className="attention-row-meta">
+                  原收件人：
+                  {recipient?.name ||
+                    message.to_run_id ||
+                    "项目协作成员"} ·{" "}
+                  {message.acknowledged_at ? "已读，尚未处理" : "尚未确认收到"}
+                </span>
+              </div>
+              <Badge variant="outline">等待处理</Badge>
+              <ArrowRight className="attention-row-arrow" aria-hidden="true" />
+            </button>
+          );
+        })}
+        {omittedRequests.map(({ taskId, count }) => {
+          const task = data.tasks.find((item) => item.id === taskId);
+          return (
+            <button
+              key={`older-${taskId}`}
+              className="attention-row"
+              onClick={() => (task ? openTask(task) : openDiscussions())}
+            >
+              <AlertCircle className="attention-row-icon" aria-hidden="true" />
+              <div className="attention-row-content">
+                <div className="attention-row-title">
+                  <strong>
+                    {task ? `${task.short_id} ${task.title}` : "项目级请求"}
+                  </strong>
+                </div>
+                <p>
+                  还有 {count} 条较早的未处理请求，未包含在最近消息中。
+                  {task
+                    ? "打开任务执行指引，按分页提示读取完整请求。"
+                    : "通过项目事件分页读取较早请求，并由相关执行者核实处理。"}
+                </p>
+              </div>
+              <Badge variant="outline">待处理请求</Badge>
+              <ArrowRight className="attention-row-arrow" aria-hidden="true" />
+            </button>
+          );
+        })}
         {proposals.length > 0 && (
           <div className="attention-proposals">
             <p>{proposals.length} 项分工或范围申请等待确认。</p>
@@ -141,16 +237,18 @@ export function AttentionView({
             </Button>
           </div>
         )}
-        {needsAttention.length === 0 && proposals.length === 0 && (
-          <Empty className="attention-empty">
-            <EmptyHeader>
-              <EmptyTitle>当前没有阻塞或待处理事项</EmptyTitle>
-              <EmptyDescription>
-                任务进展、交接核验和待验收成果会集中出现在这里。
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
+        {needsAttention.length === 0 &&
+          proposals.length === 0 &&
+          requestTotal === 0 && (
+            <Empty className="attention-empty">
+              <EmptyHeader>
+                <EmptyTitle>当前没有阻塞或待处理事项</EmptyTitle>
+                <EmptyDescription>
+                  任务进展、交接核验和待验收成果会集中出现在这里。
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
       </section>
       <section
         className="attention-section"

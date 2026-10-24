@@ -2707,6 +2707,9 @@ function TaskDrawer({
           <ExecutionGuide
             task={t}
             loadGuide={loadWorkGuide}
+            runNames={Object.fromEntries(
+              data.runs.map((run) => [run.id, run.name]),
+            )}
             onContext={() => {
               void act(() => context(t));
             }}
