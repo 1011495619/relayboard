@@ -2,7 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { resolve, posix, isAbsolute, dirname, basename } from "node:path";
 import { realpathSync } from "node:fs";
 import { commands, queries } from "./schemas.js";
-import type { CommandName, CommandArgs, QueryName, QueryArgs, TaskFields } from "./schemas.js";
+import type { CommandName, CommandArgs, CommandInput, QueryName, QueryArgs, QueryInput, TaskFields } from "./schemas.js";
 import type { Store } from "./store.js";
 import type { RecordKind, RecordMap, VersionedRecord, Task, Run, RelayEvent, ScopeConflict, Eligibility, CommandResults, QueryResults, ContextPacket, Project, Agent, SplitProposal, ScopeProposal } from "./types.js";
 
@@ -355,8 +355,7 @@ export class Service {
       conflicts,
     };
   }
-  execute<K extends CommandName>(op: K, input?: unknown, requestId?: string): CommandResults[K];
-  execute(op: string, input?: unknown, requestId?: string): CommandResults[CommandName];
+  execute<K extends string>(op: K, input: K extends CommandName ? NoInfer<CommandInput<K>> : unknown, requestId?: string): K extends CommandName ? CommandResults[K] : CommandResults[CommandName];
   execute(op: string, input: unknown = {}, requestId?: string): CommandResults[CommandName] {
     const command = commands[op as CommandName];
     if (!command) throw new AppError("UNKNOWN_COMMAND", `未知操作 ${op}`, 400);
@@ -385,8 +384,7 @@ export class Service {
     });
     return result;
   }
-  query<K extends QueryName>(name: K, input?: unknown): QueryResults[K];
-  query(name: string, input?: unknown): QueryResults[QueryName];
+  query<K extends string>(name: K, input?: K extends QueryName ? NoInfer<QueryInput<K>> : unknown): K extends QueryName ? QueryResults[K] : QueryResults[QueryName];
   query(name: string, input: unknown = {}): QueryResults[QueryName] {
     const schema = queries[name as QueryName];
     if (!schema) throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
