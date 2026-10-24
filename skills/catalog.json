@@ -40,5 +40,12 @@
     "role": "交接双方",
     "description": "停止旧写入，保留现场，让新会话接手。",
     "prompt": "为 Relayboard 任务保存交接包，核实旧写入者与后代状态，让新会话核验现场后继续。"
+  },
+  {
+    "name": "git-commit-style",
+    "title": "Git 提交规范",
+    "role": "执行者与验收者",
+    "description": "按单一目的拆分提交，以中文说明原因。",
+    "prompt": "提交代码前检查差异与任务范围，按 类型(范围): 简述 写不超过 50 字符的标题，空行后用中文解释为什么；只用 feat、fix、refactor、docs，每个提交只做一件事。"
   }
 ]

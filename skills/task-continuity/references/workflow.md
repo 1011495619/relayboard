@@ -61,3 +61,5 @@ Report descendants' checkpoints, blockers, delivery and exits to the shared serv
 - Release only the work actually stopped. Never infer stopped status from a missing heartbeat or expired observation.
 
 If Relayboard is unreachable, preserve a local checkpoint containing IDs, last-known epoch, facts and next action. Report the outage and restore connectivity before changing shared ownership or dispatching more parallel writers. Do not create an independent replacement task database.
+
+When code commits are part of the task, apply [git-commit-style](../../git-commit-style/SKILL.md). Use one-purpose commits and record exact hashes in the checkpoint before submission or handoff.

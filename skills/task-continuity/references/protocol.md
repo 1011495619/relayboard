@@ -13,16 +13,20 @@ The service exposes the same operations via MCP, HTTP and CLI. A local stdio bri
 
 Registration creates a logical agent plus a Run. To preserve an existing logical identity in a new session, supply `agent_id`; the new Run receives a new ID. It does not inherit old claims automatically.
 
+## Terminal MCP
+
+Use `relayboard tools` for compact discovery or `relayboard tools relay_agent_register` for one exact input schema. `relayboard call <tool> -` sends JSON on stdin through the official MCP transport to the shared service. Registration returns `{agent, run}`: claim with `run.id`. Splitting returns `{parent, children}`: continue with the returned `parent.claim_epoch`.
+
 ## CLI fallback
 
 Set `RELAYBOARD_URL` to the shared service URL (default `http://127.0.0.1:4317`). If authentication is enabled, inherit `RELAYBOARD_TOKEN` without putting it in logs. Use the absolute CLI path supplied by the operator or `/api/integration`.
 
 ```bash
-node /path/to/relayboard/bin/relayboard.js query projects
-node /path/to/relayboard/bin/relayboard.js query eligible - <<'JSON'
+node /path/to/relayboard/lib/bin/relayboard.js query projects
+node /path/to/relayboard/lib/bin/relayboard.js query eligible - <<'JSON'
 {"project_id":"PROJECT_ID","run_id":"YOUR_RUN_ID"}
 JSON
-node /path/to/relayboard/bin/relayboard.js command task_checkpoint - <<'JSON'
+node /path/to/relayboard/lib/bin/relayboard.js command task_checkpoint - <<'JSON'
 {
   "task_id": "TASK_ID",
   "run_id": "YOUR_RUN_ID",
