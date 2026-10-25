@@ -8,18 +8,18 @@
 
 需要 Node.js 24+。安装包已包含构建好的网页，首次运行由 npx 安装运行依赖，启动时自动打开看板。
 
-当前尚未发布到 npm。下载 `relayboard-0.6.0.tgz`，在下载目录运行：
+当前尚未发布到 npm。下载 `relayboard-0.6.1.tgz`，在下载目录运行：
 
 ```bash
-npx --yes --package=./relayboard-0.6.0.tgz relayboard
+npx --yes --package=./relayboard-0.6.1.tgz relayboard
 ```
 
 服务启动后保留终端，按 Ctrl+C 停止。再次运行会识别已有 Relayboard 并打开同一看板。
 
 ```bash
 # 改端口、指定数据目录或关闭自动开浏览器
-npx --yes --package=./relayboard-0.6.0.tgz relayboard --port 4320 --no-open
-npx --yes --package=./relayboard-0.6.0.tgz relayboard --data-dir /absolute/path/to/data
+npx --yes --package=./relayboard-0.6.1.tgz relayboard --port 4320 --no-open
+npx --yes --package=./relayboard-0.6.1.tgz relayboard --data-dir /absolute/path/to/data
 ```
 
 发布到 npm 后，公开安装入口就是以下命令；发布前请使用上面的本地包：
@@ -134,6 +134,8 @@ RELAYBOARD_RUNNERS=1 npm start
 | 自动接手续跑 | 提醒后等待宽限期，检查预算与进程状态，再按配置顺序选择本机就绪 CLI，登记新 Run、交接并启动 |
 
 执行预算包含项目总次数、每任务尝试次数和冷却时间。普通策略编辑保留已用次数，重置须明确勾选；失败升级后须核实原因并「重新检查」。客户端版本检测不证明账户和工具审批可用。若登录、权限或命令失败，保留诊断与任务状态，避免无限重试。原生模型测试与受控进程测试分别记录在 VALIDATION.md。
+
+Codex 与 pi 的结构化模型错误会及时显示在执行记录中，即使客户端还在等待重试；成功完成后清除暂态模型错误。模型失败、进程状态和任务进度分别记录，具体失败保留在运行日志。
 
 新的执行者保留实际父 Run、范围、能力及分工关系，携带任务检查点、有序步骤、失败尝试、相关记忆和成果；旧执行权版本失效。子孙任务分别巡视；协调任务等待子任务时不会当作停滞写入者。心跳、日志和进程退出 0 不代表任务进展或交付。
 
@@ -347,7 +349,7 @@ npm run web:dev     # 另一个终端保留 npm start；Vite 在 5173 代理本�
 ```bash
 npm pack --pack-destination /absolute/path/to/releases
 # 核对包内容和发布身份后，发布已经验证过的同一个包：
-npm publish /absolute/path/to/releases/relayboard-0.6.0.tgz --access public --registry=https://registry.npmjs.org
+npm publish /absolute/path/to/releases/relayboard-0.6.1.tgz --access public --registry=https://registry.npmjs.org
 ```
 
 本项目尚未公开发布到 npm。安装包验证结果以对应版本的 `VALIDATION.md` 为准；发布者需使用有包名发布权限的 npm 账号。

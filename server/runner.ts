@@ -55,6 +55,7 @@ interface ManagedChild {
   outputBuffer: string;
   stderrTail: string;
   lastToolError: string;
+  lastModelError: string;
   finished: boolean;
 }
 export interface RunnerOptions {
@@ -328,6 +329,7 @@ export class Runner {
       outputBuffer: "",
       stderrTail: "",
       lastToolError: "",
+      lastModelError: "",
       finished: false,
     };
     this.live.set(run.id, record);
@@ -366,6 +368,31 @@ export class Runner {
               providerId = providerSessionId(run.runtime, event);
             const toolError = providerToolError(run.runtime, event);
             if (toolError) record.lastToolError = toolError;
+            const modelError = providerModelError(run.runtime, event);
+            if (
+              modelError !== undefined &&
+              modelError !== record.lastModelError
+            ) {
+              record.lastModelError = modelError;
+              s.store.transaction(() => {
+                const current = s.run(run.id);
+                s.update("run", current, {
+                  process: {
+                    ...current.process!,
+                    note: modelError
+                      ? `客户端模型请求失败：${modelError}`
+                      : undefined,
+                  },
+                });
+                s.emit(run.project_id, "runner.model_request", {
+                  run_id: run.id,
+                  task_id,
+                  summary: modelError
+                    ? `客户端模型请求失败：${modelError}`
+                    : "客户端模型请求已恢复；任务进展仍需实际报告",
+                });
+              });
+            }
             if (providerId)
               s.store.transaction(() =>
                 s.update("run", s.run(run.id), {
@@ -413,8 +440,9 @@ export class Runner {
             ended_at: stamp(),
             exit_code: code,
             signal,
-            note:
-              record.lastToolError && !savedProgress
+            note: record.lastModelError
+              ? `客户端模型请求失败：${record.lastModelError}`
+              : record.lastToolError && !savedProgress
                 ? `本次进程尚未保存任务进度。客户端工具报错：${record.lastToolError}`
                 : undefined,
             error:
@@ -655,7 +683,8 @@ export function providerSessionId(
   if (!value || typeof value !== "object") return null;
   const e = value as Record<string, unknown>;
   let id: unknown;
-  if (runtime === "codex" && e.type === "thread.started") id = e.thread_id;
+  if (runtime === "pi" && e.type === "session") id = e.id;
+  else if (runtime === "codex" && e.type === "thread.started") id = e.thread_id;
   else if (
     ["claude", "qwen"].includes(runtime) &&
     e.type === "system" &&
@@ -689,4 +718,42 @@ export function providerToolError(
     return null;
   const message = (item.error as Record<string, unknown>).message;
   return typeof message === "string" ? message.slice(0, 2000) : null;
+}
+
+/** Client terminal events affect model diagnostics, never task progress. */
+export function providerModelError(
+  runtime: string,
+  value: unknown,
+): string | undefined {
+  if (!value || typeof value !== "object") return;
+  const event = value as Record<string, unknown>;
+  if (runtime === "codex") {
+    if (event.type === "turn.completed") return "";
+    if (
+      event.type !== "turn.failed" ||
+      !event.error ||
+      typeof event.error !== "object"
+    )
+      return;
+    const message = (event.error as Record<string, unknown>).message;
+    return typeof message === "string" && message.trim()
+      ? message.trim().slice(0, 2000)
+      : "模型请求出错，详见客户端运行日志。";
+  }
+  if (runtime !== "pi") return;
+  if (
+    event.type !== "message_end" ||
+    !event.message ||
+    typeof event.message !== "object"
+  )
+    return;
+  const message = event.message as Record<string, unknown>;
+  if (message.role !== "assistant") return;
+  if (message.stopReason === "error")
+    return typeof message.errorMessage === "string" &&
+      message.errorMessage.trim()
+      ? message.errorMessage.trim().slice(0, 2000)
+      : "模型请求出错，详见客户端运行日志。";
+  if (["stop", "toolUse", "length"].includes(String(message.stopReason)))
+    return "";
 }

@@ -9,7 +9,7 @@
   "mcpServers": {
     "relayboard": {
       "command": "npx",
-      "args": ["--yes", "relayboard@0.6.0", "mcp"],
+      "args": ["--yes", "relayboard@0.6.1", "mcp"],
       "env": { "RELAYBOARD_URL": "http://127.0.0.1:4317" }
     }
   }
@@ -68,6 +68,8 @@ JSON
 - pi：原生 MCP 能力依版本而定，优先使用下方随包生命周期扩展；标准配置供已有 MCP 扩展使用。托管 CLI 可通过接手包内的 Relayboard CLI 操作共享服务。
 
 Codex/Claude 默认托管配置为本次进程注入 `relayboard_session` HTTP MCP。它与 shell 沙箱内的网络分开，避免只读终端访问不到本地服务时报告中断；不会改写客户端全局配置或沙箱/审批策略。账户、客户端启动和 MCP 工具审批仍按客户端实际配置决定。其他客户端使用已有 MCP 设置或接手包内 CLI；CLI 需要对应会话可访问本地服务。
+
+若 Codex 提示 `MCP tool call requires approval, but approval policy is never`，先按当前用户授权核对会话工具配置。本次原生验收经用户批准，在隔离 runner profile 中为 `relayboard_session` 的明确协作工具设置 `enabled_tools` 与逐工具 `approval_mode = "approve"`；没有调整文件/终端策略或全局设置。此测试配置不作为所有项目的默认策略。具体工具名称和权限以当前任务需要为准。参见 [Codex MCP](https://developers.openai.com/codex/mcp/) 与[配置参考](https://developers.openai.com/codex/config-reference/)。
 
 所有客户端仍遵循同一身份、任务归属、并发范围、原生子 Agent 登记和独立验收规则。品牌图标来自 LobeHub 静态 SVG；当前库缺失的品牌使用首字标识。
 

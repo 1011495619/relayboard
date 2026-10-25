@@ -18,6 +18,7 @@ import {
   buildRunnerArgs,
   readRunnerProfiles,
   providerSessionId,
+  providerModelError,
 } from "../server/runner.ts";
 import {
   runtimeCatalog,
@@ -568,4 +569,181 @@ test("a client tool rejection is surfaced even when its CLI exits zero, without 
   assert.match(service.run(run.id).process!.note!, /fixture requires approval/);
   assert.equal(service.task(task.id).checkpoint, null);
   assert.equal(service.task(task.id).status, "doing");
+});
+
+test("pi model errors are recognized only from structured assistant outcomes and successful retries clear the transient diagnosis", () => {
+  assert.equal(
+    providerModelError("pi", {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "Connection error.",
+      },
+    }),
+    "Connection error.",
+  );
+  assert.equal(
+    providerModelError("pi", {
+      type: "message_end",
+      message: { role: "assistant", stopReason: "toolUse" },
+    }),
+    "",
+  );
+  assert.equal(
+    providerModelError("pi", {
+      type: "message_end",
+      message: {
+        role: "user",
+        stopReason: "error",
+        errorMessage: "untrusted text",
+      },
+    }),
+    undefined,
+  );
+  assert.equal(
+    providerModelError("pi", {
+      type: "message_update",
+      message: { role: "assistant", stopReason: "error" },
+    }),
+    undefined,
+  );
+  assert.equal(
+    providerModelError("codex", {
+      type: "message_end",
+      message: { role: "assistant", stopReason: "error" },
+    }),
+    undefined,
+  );
+  assert.equal(
+    providerSessionId("pi", { type: "session", id: "real-pi-session" }),
+    "real-pi-session",
+  );
+});
+
+test("a pi connection failure is visible while its process is live and retained on stop without inventing task progress", async (t) => {
+  env(t);
+  const dir = temporary(t),
+    store = new Store(),
+    service = new Service(store);
+  t.after(() => store.close());
+  const project = service.execute("project_create", {
+    name: "Pi diagnostics",
+    objective: "show real failure",
+  });
+  const run = service.execute("agent_register", {
+    project_id: project.id,
+    name: "pi fixture",
+    runtime: "pi",
+    workdir: dir,
+  }).run;
+  const task = service.execute("task_create", {
+    project_id: project.id,
+    title: "Report failure",
+    acceptance: "actual result",
+    read_only: true,
+  });
+  service.execute("task_claim", {
+    task_id: task.id,
+    run_id: run.id,
+    expected_version: task.version,
+  });
+  const runner = new Runner(service, {
+    dataDir: dir,
+    baseUrl: "http://127.0.0.1:9999",
+    timeoutMs: 5000,
+    profiles: {
+      pi: {
+        command: process.execPath,
+        args: [
+          "-e",
+          `console.log(JSON.stringify({type:'session',id:'pi-fixture-session'}));console.log(JSON.stringify({type:'message_end',message:{role:'assistant',stopReason:'error',errorMessage:'Connection error.'}}));setInterval(()=>{},1000);`,
+        ],
+        stdin: true,
+      },
+    },
+  });
+  t.after(() => runner.close());
+  runner.start({ run_id: run.id, task_id: task.id });
+  const deadline = Date.now() + 3000;
+  while (!service.run(run.id).process?.note && Date.now() < deadline)
+    await new Promise((r) => setTimeout(r, 10));
+  assert.equal(service.run(run.id).process?.status, "running");
+  assert.match(
+    service.run(run.id).process!.note!,
+    /客户端模型请求失败：Connection error/,
+  );
+  assert.equal(service.run(run.id).provider_session_id, "pi-fixture-session");
+  const child = runner.live.get(run.id)!.child;
+  runner.stop(run.id, "test completed");
+  await once(child, "close");
+  assert.equal(service.run(run.id).process?.status, "stopped");
+  assert.match(service.run(run.id).process!.note!, /Connection error/);
+  assert.equal(service.task(task.id).checkpoint, null);
+});
+
+test("a successful pi retry clears the old model error while leaving task completion to the task protocol", async (t) => {
+  env(t);
+  const dir = temporary(t),
+    store = new Store(),
+    service = new Service(store);
+  t.after(() => store.close());
+  const project = service.execute("project_create", {
+    name: "Pi retry",
+    objective: "no stale diagnostic",
+  });
+  const run = service.execute("agent_register", {
+    project_id: project.id,
+    name: "pi fixture",
+    runtime: "pi",
+    workdir: dir,
+  }).run;
+  const task = service.execute("task_create", {
+    project_id: project.id,
+    title: "Retry",
+    acceptance: "actual result",
+    read_only: true,
+  });
+  service.execute("task_claim", {
+    task_id: task.id,
+    run_id: run.id,
+    expected_version: task.version,
+  });
+  const runner = new Runner(service, {
+    dataDir: dir,
+    baseUrl: "http://127.0.0.1:9999",
+    profiles: {
+      pi: {
+        command: process.execPath,
+        args: [
+          "-e",
+          `console.log(JSON.stringify({type:'message_end',message:{role:'assistant',stopReason:'error',errorMessage:'Connection error.'}}));console.log(JSON.stringify({type:'message_end',message:{role:'assistant',stopReason:'stop'}}));`,
+        ],
+        stdin: true,
+      },
+    },
+  });
+  runner.start({ run_id: run.id, task_id: task.id });
+  await once(runner.live.get(run.id)!.child, "close");
+  assert.equal(service.run(run.id).process?.note, undefined);
+  assert.equal(service.task(task.id).status, "doing");
+  assert.equal(service.task(task.id).checkpoint, null);
+});
+
+test("Codex upstream turn failures are distinguished from startup notices and clear on a completed turn", () => {
+  assert.equal(
+    providerModelError("codex", {
+      type: "turn.failed",
+      error: { message: "session_state_unsupported" },
+    }),
+    "session_state_unsupported",
+  );
+  assert.equal(providerModelError("codex", { type: "turn.completed" }), "");
+  assert.equal(
+    providerModelError("codex", {
+      type: "item.completed",
+      item: { type: "error", message: "configuration notice" },
+    }),
+    undefined,
+  );
 });
