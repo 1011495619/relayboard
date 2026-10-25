@@ -14,18 +14,20 @@
 
 ## 分支与推送
 
-`main` 保存已集成的代码。每轮改动先从最新 `main` 建立 `feat/<主题>`、`fix/<主题>` 或 `chore/<主题>` 分支，完成检查后提交并推送该分支，再通过 PR 合并。执行中的并行 Agent 使用独立实际 worktree；分支名称本身不隔离磁盘写入。
+只保留 `main` 和 `dev` 两个本地及远程分支。`main` 保存验证后的稳定代码；日常开发、修复和文档更新统一在 `dev`，通过检查后将 `dev` 合入 `main`。不再建立 feat、fix、chore 或迁移分支。
 
 ```bash
-git switch main
-git pull --ff-only
-git switch -c feat/example
+git switch dev
+git pull --ff-only origin dev
 # 实现并检查
 npm run check
-git push -u origin HEAD
+git push -u origin dev
+# 通过 dev → main 的 PR 集成；main 合并后将 dev 快进到 main 并推送
 ```
 
-遵循 `skills/git-commit-style/SKILL.md`。旧迁移分支和本机未提交现场先保留，确认成果已集成后再归档。禁止用强推替代正常整合。
+遵循 `skills/git-commit-style/SKILL.md`。同时运行多个写入 Agent 时使用临时 detached HEAD worktree 和明确范围，避免创建额外命名分支；完成后串行集成到 dev，并移除临时工作区。分支名称本身不隔离磁盘写入。
+
+旧工作区先保存全分支 Git bundle、暂存/未暂存补丁及文件快照，压缩后实际解压并核对哈希，再移除展开副本。旧版本、调试资料、数据库备份保存在本机单份历史压缩包中；可重新下载的安装缓存直接清理。当前源码、运行数据库及必要的 node_modules、lib、dist 保留。不要用强推替代正常整合。
 
 ## 本地版本产物
 
