@@ -1,3 +1,4 @@
+import { LongText } from "./long-text";
 import { ArrowRight, AlertCircle, CheckCircle2, Clock3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,8 @@ import {
 } from "@/components/ui/empty";
 import type { Snapshot, Task, Run, Message } from "../types";
 import { RequestResolution } from "./request-resolution";
+import { taskStatus } from "./task-status";
+import { taskAttention, attentionCount } from "@/lib/task-attention";
 
 interface Props {
   data: Snapshot;
@@ -18,53 +21,6 @@ interface Props {
   openBoard: () => void;
   openDiscussions: () => void;
   openJoin: () => void;
-}
-
-function attention(task: Task, data: Snapshot) {
-  const owner = data.runs.find((run) => run.id === task.owner_run_id);
-  if (task.status === "blocked")
-    return {
-      label: "处理阻塞",
-      reason: task.checkpoint?.blocker || "执行者已报告阻塞，请核对所需支持。",
-    };
-  if (task.status === "reconcile")
-    return {
-      label: "核验现场",
-      reason: "新负责人需要确认文件、进程和已收到的成果，再继续执行。",
-    };
-  if (task.status === "review")
-    return {
-      label: "安排验收",
-      reason: "核对交付版本和验证证据，由独立执行者或人完成评审。",
-    };
-  if (
-    task.owner_run_id &&
-    task.status !== "done" &&
-    (owner?.status !== "active" || owner.process?.status === "unknown")
-  )
-    return {
-      label: "核实执行状态",
-      reason:
-        "原执行会话已结束或状态待核实。先确认旧写入情况，再决定恢复或交接。",
-    };
-  if (task.workflow?.uncertain_actions.length)
-    return {
-      label: "核实未知结果",
-      reason: task.workflow.uncertain_actions[0],
-    };
-  if (
-    task.owner_run_id &&
-    ["doing", "blocked"].includes(task.status) &&
-    (data.attention
-      ? data.attention.recovery_task_ids.includes(task.id)
-      : !task.workflow || task.workflow.recovered_epoch !== task.claim_epoch)
-  )
-    return {
-      label: "恢复工作现场",
-      reason:
-        "当前执行权尚未完成恢复核验。先读取契约并确认文件、进程与前置成果。",
-    };
-  return null;
 }
 
 export function AttentionView({
@@ -78,14 +34,14 @@ export function AttentionView({
 }: Props) {
   const active = data.tasks.filter((task) => task.status !== "done");
   const needsAttention = active.flatMap((task) => {
-    const issue = attention(task, data);
+    const issue = taskAttention(task, data);
     return issue ? [{ task, ...issue }] : [];
   });
   const progressing = active.filter(
     (task) =>
       task.status === "doing" &&
       task.mode === "execute" &&
-      !attention(task, data),
+      !taskAttention(task, data),
   );
   const proposals = data.proposals.filter(
     (proposal) => proposal.status === "pending",
@@ -115,7 +71,7 @@ export function AttentionView({
         aria-labelledby="attention-objective"
       >
         <h2 id="attention-objective">{data.project.name}</h2>
-        <p>{data.project.objective}</p>
+        <LongText text={data.project.objective} />
         <div className="attention-progress">
           <CheckCircle2 aria-hidden="true" />
           <span>
@@ -132,9 +88,7 @@ export function AttentionView({
       <section className="attention-section" aria-labelledby="attention-title">
         <div className="attention-section-heading">
           <h2 id="attention-title">现在需要处理</h2>
-          <Badge variant="secondary">
-            {needsAttention.length + proposals.length + requestTotal}
-          </Badge>
+          <Badge variant="secondary">{attentionCount(data)}</Badge>
         </div>
         {needsAttention.map(({ task, label, reason }) => {
           const owner = data.runs.find((run) => run.id === task.owner_run_id);
@@ -160,9 +114,7 @@ export function AttentionView({
                   {downstream > 0 ? ` · 影响 ${downstream} 项直接下游任务` : ""}
                 </span>
               </div>
-              <Badge
-                variant={task.status === "blocked" ? "destructive" : "outline"}
-              >
+              <Badge variant={taskStatus[task.status].variant} size="status">
                 {label}
               </Badge>
               <ArrowRight className="attention-row-arrow" aria-hidden="true" />
@@ -206,7 +158,9 @@ export function AttentionView({
                       : "尚未确认收到"}
                   </span>
                 </div>
-                <Badge variant="outline">等待处理</Badge>
+                <Badge variant="warning" size="status">
+                  等待处理
+                </Badge>
                 <ArrowRight
                   className="attention-row-arrow"
                   aria-hidden="true"
@@ -243,7 +197,9 @@ export function AttentionView({
                     : "通过项目事件分页读取较早请求，并由相关执行者核实处理。"}
                 </p>
               </div>
-              <Badge variant="outline">待处理请求</Badge>
+              <Badge variant="warning" size="status">
+                待处理请求
+              </Badge>
               <ArrowRight className="attention-row-arrow" aria-hidden="true" />
             </button>
           );
@@ -327,7 +283,9 @@ export function AttentionView({
           aria-labelledby="constraints-title"
         >
           <h2 id="constraints-title">当前项目约束</h2>
-          <p className="attention-constraints">{data.project.constraints}</p>
+          <div className="attention-constraints">
+            <LongText text={data.project.constraints} />
+          </div>
         </section>
       )}
     </div>

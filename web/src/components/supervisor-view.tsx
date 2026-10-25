@@ -1,7 +1,16 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { usePageRefresh } from "./page-refresh";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  type FormEvent,
+} from "react";
 import {
   Activity,
-  RefreshCw,
+  CheckCircle2,
+  ArrowUpRight,
   Settings2,
   AlertCircle,
   Clock3,
@@ -102,51 +111,85 @@ export function SupervisorView({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [editing, setEditing] = useState(false);
-  async function refresh(offset = 0, append = false) {
-    try {
-      const result = await query("supervisor_status", {
-        project_id: scope || undefined,
-        offset,
-        limit: 20,
-      });
-      setStatus((old) =>
-        append && old
-          ? { ...result, incidents: [...old.incidents, ...result.incidents] }
-          : result,
-      );
-      if (!scope || scope === project.id)
-        setProjectPolicy(
-          result.policies.find((p) => p.project_id === project.id),
-        );
-      setError("");
-    } catch (e) {
-      setError(text(e));
-    }
-  }
-  useEffect(() => {
-    let live = true;
-    const read = () =>
-      query("supervisor_status", { project_id: scope || undefined, limit: 20 })
-        .then((result) => {
-          if (live) {
-            setStatus(result);
-            if (!scope || scope === project.id)
-              setProjectPolicy(
-                result.policies.find((p) => p.project_id === project.id),
-              );
-            setError("");
-          }
-        })
-        .catch((e) => {
-          if (live) setError(text(e));
+  const [reading, setReading] = useState(false);
+  const requestSequence = useRef(0);
+  const loadedCount = useRef(20);
+  const inFlight = useRef(false);
+  const refresh = useCallback(
+    async (offset = 0, append = false, propagate = false) => {
+      const sequence = ++requestSequence.current;
+      inFlight.current = true;
+      setReading(true);
+      try {
+        let result = await query("supervisor_status", {
+          project_id: scope || undefined,
+          offset,
+          limit: 20,
         });
-    void read();
-    const timer = setInterval(read, 15000);
+        if (!append) {
+          while (
+            result.next_offset !== null &&
+            result.incidents.length < loadedCount.current
+          ) {
+            if (sequence !== requestSequence.current) return;
+            const next = await query("supervisor_status", {
+              project_id: scope || undefined,
+              offset: result.next_offset,
+              limit: 20,
+            });
+            result = {
+              ...next,
+              incidents: [...result.incidents, ...next.incidents],
+            };
+          }
+        }
+        const policies =
+          scope && scope !== project.id
+            ? (
+                await query("supervisor_status", {
+                  project_id: project.id,
+                  limit: 1,
+                })
+              ).policies
+            : result.policies;
+        if (sequence !== requestSequence.current) return;
+        setStatus((old) => {
+          const next =
+            append && old
+              ? {
+                  ...result,
+                  incidents: [...old.incidents, ...result.incidents],
+                }
+              : result;
+          // Refreshing retains the amount of history the reader has opened.
+          loadedCount.current = Math.max(20, next.incidents.length);
+          return next;
+        });
+        setProjectPolicy(policies.find((p) => p.project_id === project.id));
+        setError("");
+      } catch (e) {
+        if (sequence === requestSequence.current) setError(text(e));
+        if (propagate) throw e;
+      } finally {
+        if (sequence === requestSequence.current) {
+          setReading(false);
+          inFlight.current = false;
+        }
+      }
+    },
+    [scope, project.id, query],
+  );
+  useEffect(() => {
+    void refresh();
+    const timer = setInterval(() => {
+      if (!inFlight.current) void refresh();
+    }, 15000);
     return () => {
-      live = false;
+      requestSequence.current++;
       clearInterval(timer);
     };
-  }, [scope, query]);
+  }, [refresh]);
+  usePageRefresh(() => refresh(0, false, true));
   const policy = projectPolicy;
   async function handle(
     incident: SupervisorIncident,
@@ -175,22 +218,184 @@ export function SupervisorView({
     }
   }
   const projectNames = new Map(projects.map((p) => [p.id, p.name]));
+  const active = status?.incidents.filter((i) => i.status !== "resolved") || [];
+  const history =
+    status?.incidents.filter((i) => i.status === "resolved") || [];
+  const editPolicy = () =>
+    query("supervisor_status", { project_id: project.id })
+      .then((r) => {
+        setProjectPolicy(r.policies[0]);
+        setEditing(true);
+      })
+      .catch((e) => notify(text(e), true));
+  const incidentList = (
+    items: SupervisorStatus["incidents"],
+    historical: boolean,
+  ) => (
+    <div className="supervisor-incidents">
+      {items.map((incident) => {
+        const task = tasks.find((t) => t.id === incident.task_id);
+        return (
+          <Card
+            key={incident.id}
+            variant="incident"
+            className="supervisor-incident"
+          >
+            <CardHeader>
+              <div className="supervisor-incident-meta">
+                <Badge
+                  variant={
+                    incident.status === "escalated"
+                      ? "destructive"
+                      : incident.status === "resolved"
+                        ? "success"
+                        : incident.status === "recovering"
+                          ? "active"
+                          : "warning"
+                  }
+                  size="status"
+                >
+                  {incident.status === "resolved" ? (
+                    <CheckCircle2 />
+                  ) : incident.status === "recovering" ? (
+                    <Activity />
+                  ) : (
+                    <AlertCircle />
+                  )}
+                  {statuses[incident.status]}
+                </Badge>
+                <span>
+                  {projectNames.get(incident.project_id) ||
+                    incident.project_name}
+                </span>
+                {incident.snoozed_until &&
+                  Date.parse(incident.snoozed_until) > Date.now() && (
+                    <Badge variant="outline">已暂缓</Badge>
+                  )}
+              </div>
+              <CardTitle>
+                <span className="supervisor-task-id">
+                  {incident.task_short_id}
+                </span>
+                {incident.task_title}
+              </CardTitle>
+              <CardDescription>{incident.reason}</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {incident.resolution && (
+                <p className="supervisor-resolution">{incident.resolution}</p>
+              )}
+              <details className="supervisor-details">
+                <summary>
+                  处理记录 · 首次发现 {stamp(incident.first_seen_at)}
+                </summary>
+                <div>
+                  <p>
+                    最近提醒：{stamp(incident.notified_at)} · 恢复尝试：
+                    {incident.attempts} 次
+                  </p>
+                  {incident.replacement_run_id && (
+                    <p>
+                      接手 Run：<code>{incident.replacement_run_id}</code>
+                    </p>
+                  )}
+                  {!incident.resolution && <p>等待项目策略处理。</p>}
+                </div>
+              </details>
+            </CardContent>
+            <CardFooter className="flex flex-wrap gap-2">
+              {task ? (
+                <Button variant="outline" onClick={() => openTask(task)}>
+                  查看任务
+                  <ArrowUpRight data-icon="inline-end" />
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => openProject(incident.project_id)}
+                >
+                  打开所在项目
+                  <ArrowUpRight data-icon="inline-end" />
+                </Button>
+              )}
+              {!["resolved", "recovering"].includes(incident.status) && (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={busy || reading}
+                    onClick={() => void handle(incident, "recheck")}
+                  >
+                    <Activity data-icon="inline-start" />
+                    重新检查
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busy || reading}
+                    onClick={() => void handle(incident, "snooze")}
+                  >
+                    <Clock3 data-icon="inline-start" />
+                    暂缓一小时
+                  </Button>
+                </>
+              )}
+            </CardFooter>
+          </Card>
+        );
+      })}
+      {!items.length && (
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>
+              {historical
+                ? "暂无已解除记录"
+                : status?.next_offset !== null
+                  ? "已加载记录中没有待处理项"
+                  : "当前范围没有待处理问题"}
+            </EmptyTitle>
+            <EmptyDescription>
+              {status?.next_offset !== null
+                ? "还有更多记录，继续加载查看。"
+                : historical
+                  ? "告警解除后，会保留在这里供你回顾。"
+                  : "新的任务停滞会在下一次巡视中记录。"}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
+    </div>
+  );
   return (
-    <section className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          后台每 15
-          秒巡视所有项目及子任务。先提醒，再按项目策略带着记忆接手。巡视本身不调用模型。
-        </p>
-        <div className="flex flex-wrap gap-2">
+    <section className="supervisor-view">
+      <div className="supervisor-main">
+        <div className="supervisor-toolbar">
+          <Field orientation="horizontal">
+            <FieldLabel htmlFor="supervisor-scope">查看范围</FieldLabel>
+            <NativeSelect
+              id="supervisor-scope"
+              value={scope}
+              onChange={(e) => {
+                loadedCount.current = 20;
+                requestSequence.current++;
+                setScope(e.target.value);
+                setStatus(null);
+              }}
+            >
+              <option value="">所有项目</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
           <Button
             variant="outline"
-            disabled={busy}
+            disabled={busy || reading}
             onClick={async () => {
               setBusy(true);
               try {
                 await scan();
-                await refresh();
+                await refresh(0, false, true);
                 notify("巡视完成");
               } catch (e) {
                 notify(text(e), true);
@@ -199,186 +404,116 @@ export function SupervisorView({
               }
             }}
           >
-            <RefreshCw data-icon="inline-start" />
-            立即巡视
-          </Button>
-          <Button
-            onClick={() =>
-              query("supervisor_status", { project_id: project.id })
-                .then((r) => {
-                  setProjectPolicy(r.policies[0]);
-                  setEditing(true);
-                })
-                .catch((e) => notify(text(e), true))
-            }
-          >
-            <Settings2 data-icon="inline-start" />
-            当前项目策略
+            <Activity data-icon="inline-start" />
+            {busy ? "处理中…" : "立即巡视"}
           </Button>
         </div>
-      </div>
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>{project.name}</CardTitle>
-          <CardDescription>
-            当前项目：{modes[policy?.mode || "observe"]} · 已用执行预算{" "}
-            {policy?.launches || 0}/{policy?.max_launches || 0}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            {policy
-              ? `${policy.stale_after_seconds / 60} 分钟无进展后处理，提醒后等待 ${policy.grace_seconds / 60} 分钟。恢复工具顺序：${policy.runtimes.map((r) => runtimeNames[r]).join(" → ")}。`
-              : "尚未配置策略，默认只观察。通过项目策略可启用持久提醒或有预算的自动接手。"}
-          </p>
-        </CardContent>
-        <CardFooter>
-          <Badge variant="outline">心跳 ≠ 任务进展</Badge>
-        </CardFooter>
-      </Card>
-      <Field>
-        <FieldLabel htmlFor="supervisor-scope">巡视范围</FieldLabel>
-        <NativeSelect
-          id="supervisor-scope"
-          value={scope}
-          onChange={(e) => {
-            setScope(e.target.value);
-            setStatus(null);
-          }}
-        >
-          <option value="">所有项目</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </NativeSelect>
-      </Field>
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      {!status && !error && <Skeleton className="h-40 w-full" />}
-      {status && (
-        <>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="secondary">
-              当前列表{" "}
-              {status.incidents.filter((i) => i.status !== "resolved").length}{" "}
-              项待处理
-            </Badge>
-            <Badge variant="outline">全部历史 {status.total} 项</Badge>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {status.incidents.map((incident) => {
-              const task = tasks.find((t) => t.id === incident.task_id);
-              return (
-                <Card key={incident.id} size="sm">
-                  <CardHeader>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge
-                        variant={
-                          incident.status === "escalated"
-                            ? "destructive"
-                            : "secondary"
-                        }
-                      >
-                        {statuses[incident.status]}
-                      </Badge>
-                      <Badge variant="outline">
-                        {projectNames.get(incident.project_id) ||
-                          incident.project_id}
-                      </Badge>
-                      {incident.snoozed_until &&
-                        Date.parse(incident.snoozed_until) > Date.now() && (
-                          <Badge variant="outline">已暂缓</Badge>
-                        )}
-                    </div>
-                    <CardTitle>
-                      {incident.task_short_id} {incident.task_title}
-                    </CardTitle>
-                    <CardDescription>{incident.reason}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-2">
-                    <p className="text-sm whitespace-pre-wrap break-words">
-                      {incident.resolution || "等待项目策略处理。"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      首次发现 {stamp(incident.first_seen_at)}
-                      <br />
-                      提醒 {stamp(incident.notified_at)} · 恢复尝试{" "}
-                      {incident.attempts} 次
-                    </p>
-                    {incident.replacement_run_id && (
-                      <code className="text-xs break-all">
-                        接手 Run：{incident.replacement_run_id}
-                      </code>
-                    )}
-                  </CardContent>
-                  <CardFooter className="flex flex-wrap gap-2">
-                    {task ? (
-                      <Button variant="outline" onClick={() => openTask(task)}>
-                        查看任务
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        onClick={() => openProject(incident.project_id)}
-                      >
-                        打开所在项目
-                      </Button>
-                    )}
-                    {!["resolved", "recovering"].includes(incident.status) && (
-                      <>
-                        <Button
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => void handle(incident, "recheck")}
-                        >
-                          <Activity data-icon="inline-start" />
-                          重新检查
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => void handle(incident, "snooze")}
-                        >
-                          <Clock3 data-icon="inline-start" />
-                          暂缓一小时
-                        </Button>
-                      </>
-                    )}
-                  </CardFooter>
-                </Card>
-              );
-            })}
-          </div>
-          {!status.incidents.length && (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>目前没有巡视问题</EmptyTitle>
-                <EmptyDescription>
-                  新的任务停滞会在下一次巡视中记录。无需常驻模型会话。
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          )}
-          {status.next_offset !== null && (
-            <Button
-              variant="outline"
-              onClick={() => void refresh(status.next_offset!, true)}
-            >
-              加载更多历史
-            </Button>
-          )}
-          <Alert>
-            <Activity />
-            <AlertDescription>{status.notice}</AlertDescription>
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>{error}</AlertDescription>
           </Alert>
-        </>
-      )}
+        )}
+        {!status && !error && <Skeleton className="h-60 w-full" />}
+        {status && (
+          <Tabs defaultValue="active" className="gap-5">
+            <TabsList aria-label="巡视事项分类">
+              <TabsTrigger value="active">
+                待处理
+                <Badge variant={active.length ? "warning" : "secondary"}>
+                  {active.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="history">
+                已解除<Badge variant="secondary">{history.length}</Badge>
+              </TabsTrigger>
+            </TabsList>
+            <p className="supervisor-list-note">
+              {status.next_offset !== null
+                ? `已加载 ${status.incidents.length} / ${status.total} 条，分类数量仅统计已加载记录。`
+                : `当前范围共 ${status.total} 条记录，待处理 ${active.length} 条。`}
+            </p>
+            <TabsContent value="active">
+              {incidentList(active, false)}
+            </TabsContent>
+            <TabsContent value="history">
+              {incidentList(history, true)}
+            </TabsContent>
+            {status.next_offset !== null && (
+              <Button
+                variant="outline"
+                disabled={reading || busy}
+                onClick={() => void refresh(status.next_offset!, true)}
+              >
+                {reading ? "加载中…" : "加载更多记录"}
+              </Button>
+            )}
+          </Tabs>
+        )}
+      </div>
+      <aside className="supervisor-aside" aria-label="当前项目巡视策略">
+        <Card>
+          <CardHeader>
+            <CardTitle>当前项目策略</CardTitle>
+            <CardDescription>{project.name}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-5">
+            <Badge
+              variant={policy?.mode === "recover" ? "active" : "secondary"}
+            >
+              {modes[policy?.mode || "observe"]}
+            </Badge>
+            <dl className="supervisor-policy-facts">
+              <div>
+                <dt>执行预算已用</dt>
+                <dd>
+                  {policy?.launches || 0} / {policy?.max_launches || 0}
+                </dd>
+              </div>
+              {policy && (
+                <>
+                  <div>
+                    <dt>无进展阈值</dt>
+                    <dd>{policy.stale_after_seconds / 60} 分钟</dd>
+                  </div>
+                  <div>
+                    <dt>提醒后等待</dt>
+                    <dd>{policy.grace_seconds / 60} 分钟</dd>
+                  </div>
+                </>
+              )}
+            </dl>
+            <p className="supervisor-policy-note">
+              {policy
+                ? `恢复工具顺序：${policy.runtimes.map((r) => runtimeNames[r]).join(" → ") || "尚未指定"}。`
+                : "默认仅观察。可设置提醒，或启用有预算的自动接手。"}
+            </p>
+          </CardContent>
+          <CardFooter>
+            <Button variant="outline" onClick={editPolicy}>
+              <Settings2 data-icon="inline-start" />
+              配置项目策略
+            </Button>
+          </CardFooter>
+        </Card>
+        <div className="supervisor-help">
+          <h2>
+            <Clock3 aria-hidden="true" />
+            巡视如何工作
+          </h2>
+          <p>
+            后台每 15
+            秒巡视所有项目及子任务，巡视本身不调用模型。发现停滞后，按对应项目策略提醒或接手。
+          </p>
+          <p>心跳表示会话仍在，检查点和成果才代表任务进展。</p>
+          {status && (
+            <details className="supervisor-details">
+              <summary>查看巡视说明</summary>
+              <p>{status.notice}</p>
+            </details>
+          )}
+        </div>
+      </aside>
       {editing && (
         <PolicyEditor
           project={project}

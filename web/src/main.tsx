@@ -97,6 +97,7 @@ import {
   CardDescription,
   CardContent,
   CardFooter,
+  CardAction,
 } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
@@ -140,6 +141,9 @@ import type {
   QueryResults,
 } from "./types";
 import { AttentionView } from "./components/attention-view";
+import { ProjectSwitcher } from "./components/project-switcher";
+import { attentionCount } from "@/lib/task-attention";
+import { TaskStatusBadge } from "./components/task-status";
 import { RequestResolution } from "./components/request-resolution";
 import { ExecutionGuide } from "./components/execution-guide";
 import { ExecutionEditor } from "./components/execution-editor";
@@ -153,6 +157,12 @@ import {
 import { AgentIcon } from "./components/agent-icon";
 import { AgentCatalog } from "./components/agent-catalog";
 import { ProjectMemoryView } from "./components/project-memory.tsx";
+import { LongText } from "./components/long-text";
+import {
+  PageRefreshProvider,
+  PageRefreshButton,
+  usePageRefresh,
+} from "./components/page-refresh";
 import { SupervisorView } from "./components/supervisor-view.tsx";
 import {
   EvidenceHistory,
@@ -376,15 +386,7 @@ function Avatar({
   );
 }
 function Badge({ status }: { status: TaskStatus }) {
-  return (
-    <UiBadge
-      variant="outline"
-      className={cn("status-badge", `status-${status}`)}
-    >
-      <span className="status-dot" />
-      {statusNames[status] || status}
-    </UiBadge>
-  );
+  return <TaskStatusBadge status={status} />;
 }
 function Empty({
   icon: Icon = Layers3,
@@ -506,7 +508,9 @@ function Text({
 }
 
 function App() {
-  const [projects, setProjects] = useState<Project[]>([]),
+  const isMobile = useIsMobile();
+  const [mobileStatus, setMobileStatus] = useState("all");
+  const [projects, setProjects] = useState<QueryResults["projects"]>([]),
     [projectId, setProjectId] = useState(
       localStorage.getItem("relayboard-project") || "",
     ),
@@ -589,10 +593,12 @@ function App() {
         setConnected(true);
       }
       setAuth(false);
+      return true;
     } catch (e) {
       if (sequence !== refreshSequence.current) return;
       setConnected(false);
       handleError(e);
+      return false;
     } finally {
       if (sequence === refreshSequence.current) setLoading(false);
     }
@@ -799,31 +805,15 @@ function App() {
             Relayboard<small>AI 协作工作台</small>
           </span>
         </a>
-        <div className="sidebar-label">
-          工作空间 <span>LOCAL</span>
-        </div>
-        <div className="project-list">
-          {projects.map((p) => (
-            <button
-              key={p.id}
-              className={`project-link ${p.id === projectId ? "selected" : ""}`}
-              onClick={() => {
-                setProjectId(p.id);
-                setMobileNav(false);
-              }}
-            >
-              <span className="project-symbol">{p.name.slice(0, 1)}</span>
-              <span>{p.name}</span>
-              <ChevronDown size={13} />
-            </button>
-          ))}
-        </div>
-        <button
-          className="new-project"
-          onClick={() => setModal({ kind: "project" })}
-        >
-          <Plus size={15} /> 新建项目
-        </button>
+        <ProjectSwitcher
+          projects={projects}
+          projectId={projectId}
+          onSelect={(id) => {
+            setProjectId(id);
+            setMobileNav(false);
+          }}
+          onCreate={() => setModal({ kind: "project" })}
+        />
         <div className="sidebar-label section-label">项目协作</div>
         <nav aria-label="项目导航">
           <SidebarMenu>
@@ -833,6 +823,7 @@ function App() {
                 <SidebarMenuItem key={key}>
                   <SidebarMenuButton
                     isActive={view === key}
+                    aria-current={view === key ? "page" : undefined}
                     className="nav-link"
                     onClick={() => {
                       setView(key);
@@ -913,6 +904,9 @@ function App() {
                 {
                   {
                     home: "先看哪里需要处理，再继续下一步工作。",
+                    supervisor: "集中处理任务停滞，按项目策略提醒与接手。",
+                    memory: "把项目事实和经验留下来，让下一位执行者接着做。",
+                    clients: "选择执行工具，检查本机可用状态并配置接入。",
                     board: "目标、进度与交接，留在同一个地方。",
                     join: "先检查依赖和修改范围，再领取适合你的工作。",
                     agents: "从主执行者到子 agent，每一份工作都有归属。",
@@ -927,21 +921,35 @@ function App() {
               </p>
             </div>
             <div className="heading-actions">
-              {project && (
+              <PageRefreshButton
+                key={`${view}:${projectId}`}
+                refresh={async () => {
+                  if ((await refresh()) === false)
+                    throw Error("刷新失败，请检查本地服务连接后重试");
+                }}
+                notify={notify}
+              />
+              {project &&
+                ["home", "board", "join", "agents"].includes(view) && (
+                  <Button
+                    icon={Users}
+                    className="heading-register"
+                    onClick={() => setModal({ kind: "agent" })}
+                  >
+                    登记执行者
+                  </Button>
+                )}
+              {(!project || ["home", "board", "join"].includes(view)) && (
                 <Button
-                  icon={Users}
-                  onClick={() => setModal({ kind: "agent" })}
+                  icon={Plus}
+                  variant="primary"
+                  onClick={() =>
+                    setModal({ kind: project ? "task" : "project" })
+                  }
                 >
-                  登记执行者
+                  {project ? "新建任务" : "创建项目"}
                 </Button>
               )}
-              <Button
-                icon={Plus}
-                variant="primary"
-                onClick={() => setModal({ kind: project ? "task" : "project" })}
-              >
-                {project ? "新建任务" : "创建项目"}
-              </Button>
             </div>
           </div>
           {view === "skills" ? (
@@ -1048,10 +1056,7 @@ function App() {
                     />
                     <span className="summary-attention">
                       <AlertCircle size={14} />
-                      {tasks.filter((t) =>
-                        ["blocked", "reconcile"].includes(t.status),
-                      ).length + pendingCount}{" "}
-                      项需要关注
+                      {data ? attentionCount(data) : 0} 项需要关注
                     </span>
                   </div>
                 </>
@@ -1135,12 +1140,46 @@ function App() {
                         </SelectContent>
                       </Select>
                     )}
+                    {view === "board" && isMobile && !treeView && (
+                      <Select
+                        items={[
+                          { value: "all", label: "全部状态" },
+                          { value: "pending", label: "待领取" },
+                          { value: "doing", label: "进行中 / 受阻" },
+                          { value: "reconcile", label: "待核验" },
+                          { value: "review", label: "待验收" },
+                          { value: "done", label: "已完成" },
+                        ]}
+                        value={mobileStatus}
+                        onValueChange={(value) =>
+                          setMobileStatus(value || "all")
+                        }
+                      >
+                        <SelectTrigger aria-label="筛选任务状态">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="all">全部状态</SelectItem>
+                            <SelectItem value="pending">待领取</SelectItem>
+                            <SelectItem value="doing">进行中 / 受阻</SelectItem>
+                            <SelectItem value="reconcile">待核验</SelectItem>
+                            <SelectItem value="review">待验收</SelectItem>
+                            <SelectItem value="done">已完成</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 </div>
               )}
               {view === "board" &&
                 (tasks.length ? (
-                  treeView ? (
+                  !tasks.some(matches) ? (
+                    <Empty title="没有匹配的任务">
+                      调整搜索关键词或任务筛选条件，查看其他工作。
+                    </Empty>
+                  ) : treeView ? (
                     <div className="tree-table">
                       <div className="tree-table-head">
                         <span>任务与层级</span>
@@ -1165,13 +1204,13 @@ function App() {
                     <div className="board">
                       {(
                         [
-                          ["pending", "待领取", Circle],
-                          ["doing", "进行中", CircleDot],
-                          ["reconcile", "待核验", ArrowLeftRight],
-                          ["review", "待验收", ShieldCheck],
-                          ["done", "已完成", CheckCircle2],
+                          "pending",
+                          "doing",
+                          "reconcile",
+                          "review",
+                          "done",
                         ] as const
-                      ).map(([status, label, Icon]) => {
+                      ).map((status) => {
                         const column = tasks.filter(
                           (t) =>
                             matches(t) &&
@@ -1179,21 +1218,34 @@ function App() {
                               ? ["doing", "blocked"].includes(t.status)
                               : t.status === status),
                         );
+                        if (
+                          isMobile &&
+                          (mobileStatus === "all"
+                            ? !column.length
+                            : mobileStatus !== status)
+                        ) {
+                          return null;
+                        }
                         return (
                           <section
-                            className={`column column-${status}`}
+                            className={cn("column", `column-${status}`)}
                             key={status}
                           >
                             <div className="column-title">
-                              <Icon size={16} />
-                              <h2>{label}</h2>
+                              <h2>
+                                <TaskStatusBadge status={status} />
+                              </h2>
                               <span>{column.length}</span>
-                              <button
-                                aria-label={`在${label}列创建任务`}
-                                onClick={() => setModal({ kind: "task" })}
-                              >
-                                <Plus size={15} />
-                              </button>
+                              {status === "pending" && (
+                                <UiButton
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label="创建待领取任务"
+                                  onClick={() => setModal({ kind: "task" })}
+                                >
+                                  <Plus />
+                                </UiButton>
+                              )}
                             </div>
                             <div className="column-cards">
                               {column.map((t) => (
@@ -1207,11 +1259,13 @@ function App() {
                               ))}
                               {!column.length && (
                                 <div className="column-empty">
-                                  {status === "pending"
-                                    ? "新的工作从这里开始"
-                                    : status === "done"
-                                      ? "通过验收的成果留在这里"
-                                      : "暂无任务"}
+                                  {search || filter !== "all"
+                                    ? "当前筛选下暂无任务"
+                                    : status === "pending"
+                                      ? "新的工作从这里开始"
+                                      : status === "done"
+                                        ? "通过验收的成果留在这里"
+                                        : "暂无任务"}
                                 </div>
                               )}
                             </div>
@@ -1358,7 +1412,9 @@ function App() {
                   setModal={setModal}
                   act={act}
                   api={api}
-                  refresh={refresh}
+                  refresh={async () => {
+                    await refresh();
+                  }}
                   notify={notify}
                 />
               )}
@@ -1464,7 +1520,9 @@ function App() {
           setProjectId={setProjectId}
           setRunId={setRunId}
           setModal={setModal}
-          refresh={refresh}
+          refresh={async () => {
+            await refresh();
+          }}
         />
       )}
     </SidebarProvider>
@@ -1489,91 +1547,104 @@ function TaskCard({
       (id) => tasks.find((d) => d.id === id)?.status !== "done",
     );
   return (
-    <button
-      className={`task-card ${t.status === "blocked" ? "is-blocked" : ""}`}
-      onClick={onClick}
-    >
-      <div className="card-top">
-        <span className="task-id">{t.short_id}</span>
-        {t.mode === "coordinator" ? (
-          <span className="coordinator-label">
-            <GitBranch size={11} />
-            协调
-          </span>
-        ) : t.priority === "high" ? (
-          <span className="priority-high">优先</span>
-        ) : (
-          <MoreHorizontal size={15} className="card-dots" />
-        )}
-      </div>
-      {parent && (
-        <div className="parent-label">
-          <Corner />
-          {parent.title}
-        </div>
-      )}
-      <h3>{t.title}</h3>
-      {t.checkpoint ? (
-        <p className="card-description">{t.checkpoint.summary}</p>
-      ) : (
-        t.description && <p className="card-description">{t.description}</p>
-      )}
-      <div className="card-tags">
-        {t.read_only ? (
-          <span className="scope-tag">
-            <FileText size={11} />
-            只读
-          </span>
-        ) : (
-          t.scopes.slice(0, 2).map((s) => (
-            <span className="scope-tag" key={s}>
-              {s}
-            </span>
-          ))
-        )}
-        {t.resources.length > 0 && (
-          <span className="resource-tag">
-            <LockKeyhole size={11} />
-            {t.resources.length}
-          </span>
-        )}
-      </div>
-      {children.length > 0 && (
-        <div className="child-progress">
-          <ListTree size={13} />
-          <span>子任务</span>
-          <div>
-            <i
-              style={{
-                width: `${(children.filter((c) => c.status === "done").length / children.length) * 100}%`,
-              }}
-            />
+    <button className="task-card-trigger group/task-trigger" onClick={onClick}>
+      <Card
+        variant="task"
+        tone={t.status === "blocked" ? "blocked" : "default"}
+      >
+        <CardHeader>
+          <div className="task-card-top">
+            <span className="task-card-id">{t.short_id}</span>
+            {t.status === "blocked" ? (
+              <TaskStatusBadge status="blocked" />
+            ) : t.priority === "high" ? (
+              <UiBadge variant="warning" size="status">
+                <ArrowUpRight data-icon="inline-start" />
+                优先处理
+              </UiBadge>
+            ) : t.mode === "coordinator" ? (
+              <UiBadge variant="secondary">
+                <GitBranch data-icon="inline-start" />
+                协调任务
+              </UiBadge>
+            ) : null}
           </div>
-          <b>
-            {children.filter((c) => c.status === "done").length}/
-            {children.length}
-          </b>
-        </div>
-      )}
-      {t.status === "blocked" && (
-        <div className="card-blocker">
-          <AlertCircle size={12} />
-          {t.checkpoint?.blocker}
-        </div>
-      )}
-      {blocked.length > 0 && t.status === "pending" && (
-        <div className="dependency-label">
-          <Link2 size={12} />
-          等待 {blocked.length} 项依赖验收
-        </div>
-      )}
-      <div className="card-bottom">
-        <span>
-          <Avatar run={owner} small />
-          {owner?.name || "待领取"}
-        </span>
-        <small>{t.checkpoint ? relative(t.checkpoint.at) : "尚无检查点"}</small>
-      </div>
+          {parent && (
+            <div className="task-card-parent">
+              <GitBranch size={12} aria-hidden="true" />
+              <span className="truncate">{parent.title}</span>
+            </div>
+          )}
+          <CardTitle>{t.title}</CardTitle>
+          {(t.checkpoint?.summary || t.description) && (
+            <CardDescription className="line-clamp-2">
+              {t.checkpoint?.summary || t.description}
+            </CardDescription>
+          )}
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {t.status === "blocked" && (
+            <Alert variant="destructive" role="status">
+              <AlertCircle />
+              <AlertDescription>
+                {t.checkpoint?.blocker ||
+                  "执行者已报告阻塞，打开详情查看所需支持。"}
+              </AlertDescription>
+            </Alert>
+          )}
+          {blocked.length > 0 && t.status === "pending" && (
+            <UiBadge variant="warning" size="status">
+              <Link2 data-icon="inline-start" />
+              等待 {blocked.length} 项依赖验收
+            </UiBadge>
+          )}
+          <div className="task-card-paths">
+            {t.read_only ? (
+              <>
+                <FileText size={13} aria-hidden="true" />
+                <span>只读任务</span>
+              </>
+            ) : (
+              <>
+                <FolderGit2 size={13} aria-hidden="true" />
+                <code className="truncate" title={t.scopes.join("、")}>
+                  {t.scopes[0] || "尚未设置范围"}
+                </code>
+                {t.scopes.length > 1 && <span>+{t.scopes.length - 1}</span>}
+              </>
+            )}
+            {t.resources.length > 0 && (
+              <>
+                <LockKeyhole size={13} aria-hidden="true" />
+                <span>{t.resources.length} 项资源</span>
+              </>
+            )}
+          </div>
+          {children.length > 0 && (
+            <div className="task-card-paths">
+              <ListTree size={13} aria-hidden="true" />
+              <span>
+                子任务{" "}
+                {children.filter((child) => child.status === "done").length}/
+                {children.length} 已验收
+              </span>
+            </div>
+          )}
+        </CardContent>
+        <CardFooter className="justify-between gap-2">
+          <span className="task-card-owner">
+            <Avatar run={owner} small />
+            <span className="truncate">{owner?.name || "待领取"}</span>
+          </span>
+          <time
+            className="task-card-time"
+            dateTime={t.checkpoint?.at}
+            title={t.checkpoint ? time(t.checkpoint.at) : undefined}
+          >
+            {t.checkpoint ? relative(t.checkpoint.at) : "尚无进度"}
+          </time>
+        </CardFooter>
+      </Card>
     </button>
   );
 }
@@ -1674,23 +1745,41 @@ function AgentView({
                 {run.parent_run_id ? "子执行者" : "主执行者"}
               </span>
             </div>
-            <span
-              className={`liveness ${run.liveness === "reported" ? "reported" : ""}`}
+            <UiBadge
+              variant={
+                run.process?.status === "running"
+                  ? "active"
+                  : run.process?.status === "failed"
+                    ? "destructive"
+                    : run.status === "unknown" || run.liveness === "unconfirmed"
+                      ? "warning"
+                      : "secondary"
+              }
+              size="status"
             >
-              <span />
-              {run.process?.status === "running"
-                ? "托管进程运行中"
-                : run.process?.status === "failed"
-                  ? "进程执行失败"
-                  : ["exited", "stopped"].includes(run.process?.status || "")
-                    ? "托管进程已退出"
-                    : run.status === "ended"
-                      ? "会话结束"
-                      : run.status === "unknown" ||
-                          run.liveness === "unconfirmed"
-                        ? "状态待核实"
-                        : "已登记"}
-            </span>
+              {run.process?.status === "running" ? (
+                <>
+                  <Play data-icon="inline-start" />
+                  托管进程运行中
+                </>
+              ) : run.process?.status === "failed" ? (
+                <>
+                  <AlertCircle data-icon="inline-start" />
+                  进程执行失败
+                </>
+              ) : ["exited", "stopped"].includes(run.process?.status || "") ? (
+                "托管进程已退出"
+              ) : run.status === "ended" ? (
+                "会话结束"
+              ) : run.status === "unknown" || run.liveness === "unconfirmed" ? (
+                <>
+                  <AlertCircle data-icon="inline-start" />
+                  状态待核实
+                </>
+              ) : (
+                "已登记"
+              )}
+            </UiBadge>
           </div>
           <div className="agent-details">
             <div>
@@ -2237,10 +2326,18 @@ function SkillsView({
     [selected, setSelected] = useState<SkillSource | null>(null),
     [skillOpen, setSkillOpen] = useState(false),
     [error, setError] = useState("");
+  async function refreshSkills() {
+    try {
+      setSkills(await api("/skills", null, "GET"));
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      throw e;
+    }
+  }
+  usePageRefresh(refreshSkills);
   useEffect(() => {
-    api("/skills", null, "GET")
-      .then(setSkills)
-      .catch((e) => setError(e.message));
+    void refreshSkills().catch(() => {});
   }, []);
   const copy = async (text: string) => {
     try {
@@ -2370,13 +2467,17 @@ function SettingsView({
   const [integration, setIntegration] = useState<Integration | null>(null),
     [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]),
     [tab, setTab] = useState("http");
+  async function refreshSettings() {
+    const [nextIntegration, nextRuntimes] = await Promise.all([
+      api("/integration", null, "GET"),
+      api("/runtimes", null, "GET"),
+    ]);
+    setIntegration(nextIntegration);
+    setRuntimes(nextRuntimes);
+  }
+  usePageRefresh(refreshSettings);
   useEffect(() => {
-    api("/integration", null, "GET")
-      .then(setIntegration)
-      .catch((e) => notify(e.message, true));
-    api("/runtimes", null, "GET")
-      .then(setRuntimes)
-      .catch((e) => notify(e.message, true));
+    void refreshSettings().catch((e) => notify(e.message, true));
   }, []);
   const stdio =
     integration &&
@@ -2404,114 +2505,137 @@ function SettingsView({
   const snippet = tab === "http" ? http : stdio;
   return (
     <div className="settings-grid">
-      <section className="settings-card">
-        <div className="section-heading">
-          <h2>项目约定</h2>
+      <Card className="settings-project">
+        <CardHeader>
+          <CardTitle>项目约定</CardTitle>
+          <CardDescription>目标、约束与执行预算</CardDescription>
+          <CardAction>
+            <Button
+              icon={Settings2}
+              onClick={() => setModal({ kind: "project", project })}
+            >
+              编辑
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <dl>
+            <dt>项目目标</dt>
+            <dd>
+              <LongText text={project.objective} />
+            </dd>
+            <dt>用户约束</dt>
+            <dd>
+              <LongText text={project.constraints || "尚未添加"} />
+            </dd>
+            <dt>代码目录</dt>
+            <dd>
+              <code>
+                {project.root_path || "未设置；启动执行前需要设置实际目录"}
+              </code>
+            </dd>
+            <dt>执行预算</dt>
+            <dd>
+              同时 {project.max_concurrency} 个执行会话 · 子执行者最多{" "}
+              {project.max_depth} 层
+            </dd>
+          </dl>
+        </CardContent>
+        <CardFooter>
           <Button
-            icon={Settings2}
-            onClick={() => setModal({ kind: "project", project })}
+            icon={FolderGit2}
+            onClick={() => setModal({ kind: "worktree" })}
           >
-            编辑
+            创建独立 worktree
           </Button>
-        </div>
-        <dl>
-          <dt>项目目标</dt>
-          <dd>{project.objective}</dd>
-          <dt>用户约束</dt>
-          <dd>{project.constraints || "尚未添加"}</dd>
-          <dt>代码目录</dt>
-          <dd>
-            <code>
-              {project.root_path || "未设置；启动执行前需要设置实际目录"}
-            </code>
-          </dd>
-          <dt>执行预算</dt>
-          <dd>
-            同时 {project.max_concurrency} 个执行会话 · 子执行者最多{" "}
-            {project.max_depth} 层
-          </dd>
-        </dl>
-        <Button
-          icon={FolderGit2}
-          onClick={() => setModal({ kind: "worktree" })}
-        >
-          创建独立 worktree
-        </Button>
-      </section>
-      <section className="settings-card">
-        <div className="section-heading">
-          <h2>本机运行工具</h2>
-          <Terminal size={18} />
-        </div>
-        {runtimes.length ? (
-          runtimes
-            .filter((r) => r.mode === "cli" && r.available)
-            .map((r) => (
-              <div className="runtime-row" key={r.runtime}>
-                <Avatar run={{ runtime: r.runtime, name: r.name }} />
-                <div>
-                  <strong>{r.name}</strong>
-                  <small>{r.version}</small>
+        </CardFooter>
+      </Card>
+      <Card className="settings-tools">
+        <CardHeader>
+          <CardTitle>本机运行工具</CardTitle>
+          <CardDescription>已安装的 CLI 与启动状态</CardDescription>
+          <CardAction>
+            <Terminal size={18} />
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {runtimes.length ? (
+            runtimes
+              .filter((r) => r.mode === "cli" && r.available)
+              .map((r) => (
+                <div className="runtime-row" key={r.runtime}>
+                  <Avatar run={{ runtime: r.runtime, name: r.name }} />
+                  <div>
+                    <strong>{r.name}</strong>
+                    <small>{r.version}</small>
+                  </div>
+                  <UiBadge variant="outline">
+                    {r.launchable ? "CLI 已就绪" : "服务禁用启动"}
+                  </UiBadge>
                 </div>
-                <UiBadge variant="outline">
-                  {r.launchable ? "CLI 已就绪" : "服务禁用启动"}
-                </UiBadge>
-              </div>
-            ))
-        ) : (
-          <p className="muted">正在检查 CLI…</p>
-        )}
-        <p className="fine-print">
-          在侧栏「Agent 接入」查看完整客户端目录、安装说明和启动诊断。
-        </p>
-        <p className="fine-print">
-          使用各工具已有的登录与权限配置。登记会话不启动进程；启动按钮才会发起实际执行。
-        </p>
-      </section>
-      <section className="settings-card integration-card">
-        <div className="section-heading">
-          <div>
-            <h2>连接 MCP</h2>
-            <p>所有工具连接同一个后台，共享任务与消息。</p>
+              ))
+          ) : (
+            <p className="muted">正在检查 CLI…</p>
+          )}
+          <p className="fine-print">
+            在侧栏「Agent 接入」查看完整客户端目录、安装说明和启动诊断。
+          </p>
+          <p className="fine-print">
+            使用各工具已有的登录与权限配置。登记会话不启动进程；启动按钮才会发起实际执行。
+          </p>
+        </CardContent>
+      </Card>
+      <Card className="integration-card">
+        <CardHeader>
+          <CardTitle>连接 MCP</CardTitle>
+          <CardDescription>
+            所有工具连接同一个后台，共享任务与消息。
+          </CardDescription>
+          <CardAction>
+            <Button
+              icon={Copy}
+              disabled={!snippet}
+              onClick={() =>
+                act(async () => {
+                  await navigator.clipboard.writeText(snippet || "");
+                  notify("接入配置已复制");
+                })
+              }
+            >
+              复制配置
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="http">Codex · HTTP</TabsTrigger>
+              <TabsTrigger value="stdio">通用 · stdio</TabsTrigger>
+            </TabsList>
+            <TabsContent value="http">
+              <pre>{http || "读取配置中…"}</pre>
+            </TabsContent>
+            <TabsContent value="stdio">
+              <pre>{stdio || "读取配置中…"}</pre>
+            </TabsContent>
+          </Tabs>
+          <div className="integration-notes">
+            <p>
+              <strong>Claude Code：</strong>使用 stdio 配置中的命令和参数添加
+              MCP 服务，或参考项目 integrations 文档。
+            </p>
+            <p>
+              <strong>pi agent：</strong>版本支持 MCP
+              时直接接入；也可通过随附扩展或 CLI 连接。
+            </p>
+            <p>
+              <strong>协作规范：</strong>为各工具加载{" "}
+              <code>{integration?.skill || "skills/task-continuity"}</code>，子
+              agent 同样遵守登记、领取和报告约定。
+            </p>
           </div>
-          <Button
-            icon={Copy}
-            disabled={!snippet}
-            onClick={() =>
-              act(async () => {
-                await navigator.clipboard.writeText(snippet || "");
-                notify("接入配置已复制");
-              })
-            }
-          >
-            复制配置
-          </Button>
-        </div>
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
-            <TabsTrigger value="http">Codex · HTTP</TabsTrigger>
-            <TabsTrigger value="stdio">通用 · stdio</TabsTrigger>
-          </TabsList>
-          <TabsContent value={tab}>
-            <pre>{snippet || "读取配置中…"}</pre>
-          </TabsContent>
-        </Tabs>
-        <div className="integration-notes">
-          <p>
-            <strong>Claude Code：</strong>使用 stdio 配置中的命令和参数添加 MCP
-            服务，或参考项目 integrations 文档。
-          </p>
-          <p>
-            <strong>pi agent：</strong>版本支持 MCP
-            时直接接入；也可通过随附扩展或 CLI 连接。
-          </p>
-          <p>
-            <strong>协作规范：</strong>为各工具加载{" "}
-            <code>{integration?.skill || "skills/task-continuity"}</code>，子
-            agent 同样遵守登记、领取和报告约定。
-          </p>
-        </div>
-      </section>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -4473,7 +4597,9 @@ function Modal({
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
     <Toaster>
-      <App />
+      <PageRefreshProvider>
+        <App />
+      </PageRefreshProvider>
     </Toaster>
   </TooltipProvider>,
 );

@@ -1,12 +1,6 @@
+import { usePageRefresh } from "./page-refresh";
 import { useEffect, useState } from "react";
-import {
-  RefreshCw,
-  Search,
-  ExternalLink,
-  Plus,
-  AlertCircle,
-  Copy,
-} from "lucide-react";
+import { Search, ExternalLink, Plus, AlertCircle, Copy } from "lucide-react";
 import type { RunnerStatus, RuntimeId } from "../../../server/runtimes.ts";
 import {
   clientMcpConfig,
@@ -54,17 +48,19 @@ export function AgentCatalog({
     [error, setError] = useState("");
   const [search, setSearch] = useState(""),
     [filter, setFilter] = useState("all");
-  async function refresh() {
+  async function refresh(propagate = false) {
     setBusy(true);
     setError("");
     try {
       setStatus(await load(true));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      if (propagate) throw e;
     } finally {
       setBusy(false);
     }
   }
+  usePageRefresh(() => refresh(true));
   const copyConfig = async (runtime: RuntimeId) => {
     try {
       const snippet = clientMcpConfig(runtime, await integration());
@@ -108,18 +104,12 @@ export function AgentCatalog({
   );
   return (
     <section className="agent-catalog flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2>选择执行工具</h2>
-          <p className="text-sm text-muted-foreground">
-            同一块任务板，按客户端能力选择 CLI 启动或 MCP 接入。
-          </p>
-        </div>
-        <Button variant="outline" disabled={busy} onClick={refresh}>
-          <RefreshCw data-icon="inline-start" />
-          {busy ? "检测中…" : "重新检测"}
-        </Button>
-      </div>
+      <p className="catalog-summary">
+        {busy
+          ? "正在检测本机工具…"
+          : `支持 ${runtimes.length} 种客户端 · 本机就绪 ${runtimes.filter((r) => r.launchable).length} 种`}{" "}
+        · CLI 可直接启动，MCP 通过配置接入
+      </p>
       {error && (
         <Alert variant="destructive">
           <AlertCircle />
@@ -169,7 +159,16 @@ export function AgentCatalog({
                   </span>
                   <div className="flex min-w-0 flex-col gap-1">
                     <CardTitle>{r.name}</CardTitle>
-                    <Badge variant={r.launchable ? "secondary" : "outline"}>
+                    <Badge
+                      variant={
+                        r.launchable
+                          ? "success"
+                          : r.mode === "cli"
+                            ? "warning"
+                            : "secondary"
+                      }
+                      size="status"
+                    >
                       {r.mode === "cli"
                         ? r.available
                           ? r.launch_enabled

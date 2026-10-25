@@ -1,9 +1,9 @@
-import codex from "@lobehub/icons-static-svg/icons/codex.svg?raw";
+import codex from "@lobehub/icons-static-svg/icons/codex-color.svg?raw";
 import claude from "@lobehub/icons-static-svg/icons/claudecode-color.svg?raw";
 import pi from "@lobehub/icons-static-svg/icons/pi.svg?raw";
-import gemini from "@lobehub/icons-static-svg/icons/geminicli.svg?raw";
+import gemini from "@lobehub/icons-static-svg/icons/geminicli-color.svg?raw";
 import opencode from "@lobehub/icons-static-svg/icons/opencode.svg?raw";
-import copilot from "@lobehub/icons-static-svg/icons/copilot.svg?raw";
+import copilot from "@lobehub/icons-static-svg/icons/copilot-color.svg?raw";
 import cursor from "@lobehub/icons-static-svg/icons/cursor.svg?raw";
 import qwen from "@lobehub/icons-static-svg/icons/qwen-color.svg?raw";
 import goose from "@lobehub/icons-static-svg/icons/goose.svg?raw";
@@ -13,7 +13,7 @@ import cline from "@lobehub/icons-static-svg/icons/cline.svg?raw";
 import roo from "@lobehub/icons-static-svg/icons/roocode.svg?raw";
 import windsurf from "@lobehub/icons-static-svg/icons/windsurf.svg?raw";
 import trae from "@lobehub/icons-static-svg/icons/trae-color.svg?raw";
-import kiro from "@lobehub/icons-static-svg/icons/kiro.svg?raw";
+import kiro from "@lobehub/icons-static-svg/icons/kiro-color.svg?raw";
 import antigravity from "@lobehub/icons-static-svg/icons/antigravity-color.svg?raw";
 import hermes from "@lobehub/icons-static-svg/icons/hermesagent.svg?raw";
 const logos: Record<string, string> = {

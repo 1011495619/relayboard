@@ -1,3 +1,4 @@
+import { usePageRefresh } from "./page-refresh";
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import {
   Plus,
@@ -108,7 +109,7 @@ export function ProjectMemoryView({
       null,
     ),
     [editor, setEditor] = useState<ProjectMemory | "new" | null>(null);
-  async function load(offset = 0, append = false) {
+  async function load(offset = 0, append = false, propagate = false) {
     const sequence = ++requestSequence.current;
     const from = source;
     setBusy(true);
@@ -145,6 +146,7 @@ export function ProjectMemoryView({
       );
     } catch (e) {
       if (sequence === requestSequence.current) setError(message(e));
+      if (propagate) throw e;
     } finally {
       if (sequence === requestSequence.current) setBusy(false);
     }
@@ -155,6 +157,12 @@ export function ProjectMemoryView({
       .then(setSources)
       .catch((e) => setError(message(e)));
   }, []);
+  usePageRefresh(async () => {
+    await Promise.all([
+      load(0, false, true),
+      query("memory_sources", {}).then(setSources),
+    ]);
+  });
   async function open(memoryId: string, version?: number, from = source) {
     try {
       const memory =
@@ -176,85 +184,95 @@ export function ProjectMemoryView({
     }
   }
   return (
-    <section className="flex flex-col gap-5">
+    <section className="memory-view flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          把项目事实、操作手册和失败经验留给下一位执行者。接手包只携带相关摘要，正文按需读取。
+          项目事实、操作手册和失败经验，按需检索与读取。
         </p>
         <Button onClick={() => setEditor("new")}>
           <Plus data-icon="inline-start" />
           记录记忆
         </Button>
       </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void load();
-        }}
-      >
-        <FieldGroup className="sm:flex-row sm:items-end">
-          <Field>
-            <FieldLabel htmlFor="memory-query">检索记忆</FieldLabel>
-            <Input
-              id="memory-query"
-              value={search}
-              onChange={(e) => {
-                requestSequence.current++;
-                setBusy(false);
-                setResult(null);
-                setSearch(e.target.value);
-              }}
-              placeholder="例如：数据库备份、提交规范"
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="memory-source">记忆库</FieldLabel>
-            <NativeSelect
-              id="memory-source"
-              value={source}
-              onChange={(e) => {
-                requestSequence.current++;
-                setBusy(false);
-                setSource(e.target.value);
-                setResult(null);
-              }}
-            >
-              <option value="local">当前项目 · 本地</option>
-              {sources.map((s) => (
-                <option key={s.name} value={s.name}>
-                  {s.label}
-                  {s.token_configured ? "" : " · 认证待配置"}
-                </option>
-              ))}
-            </NativeSelect>
-          </Field>
-          {source === "local" && (
-            <Field>
-              <FieldLabel htmlFor="memory-status">状态</FieldLabel>
-              <NativeSelect
-                id="memory-status"
-                value={status}
-                onChange={(e) => {
-                  requestSequence.current++;
-                  setBusy(false);
-                  setResult(null);
-                  setStatus(e.target.value as typeof status);
-                }}
-              >
-                {Object.entries(states).map(([v, label]) => (
-                  <option key={v} value={v}>
-                    {label}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-          )}
-          <Button type="submit" disabled={busy}>
-            <Search data-icon="inline-start" />
-            {busy ? "检索中…" : "检索"}
-          </Button>
-        </FieldGroup>
-      </form>
+      <Card>
+        <CardHeader>
+          <CardTitle>检索记忆</CardTitle>
+          <CardDescription>
+            选择来源和状态，找到需要的项目经验。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void load();
+            }}
+          >
+            <FieldGroup className="memory-search-fields">
+              <Field>
+                <FieldLabel htmlFor="memory-query">检索记忆</FieldLabel>
+                <Input
+                  id="memory-query"
+                  value={search}
+                  onChange={(e) => {
+                    requestSequence.current++;
+                    setBusy(false);
+                    setResult(null);
+                    setSearch(e.target.value);
+                  }}
+                  placeholder="例如：数据库备份、提交规范"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="memory-source">记忆库</FieldLabel>
+                <NativeSelect
+                  id="memory-source"
+                  value={source}
+                  onChange={(e) => {
+                    requestSequence.current++;
+                    setBusy(false);
+                    setSource(e.target.value);
+                    setResult(null);
+                  }}
+                >
+                  <option value="local">当前项目 · 本地</option>
+                  {sources.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.label}
+                      {s.token_configured ? "" : " · 认证待配置"}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              {source === "local" && (
+                <Field>
+                  <FieldLabel htmlFor="memory-status">状态</FieldLabel>
+                  <NativeSelect
+                    id="memory-status"
+                    value={status}
+                    onChange={(e) => {
+                      requestSequence.current++;
+                      setBusy(false);
+                      setResult(null);
+                      setStatus(e.target.value as typeof status);
+                    }}
+                  >
+                    {Object.entries(states).map(([v, label]) => (
+                      <option key={v} value={v}>
+                        {label}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </Field>
+              )}
+              <Button type="submit" disabled={busy}>
+                <Search data-icon="inline-start" />
+                {busy ? "检索中…" : "检索"}
+              </Button>
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
       {error && (
         <Alert variant="destructive">
           <AlertCircle />
@@ -336,9 +354,14 @@ export function ProjectMemoryView({
       <Alert>
         <BookOpen />
         <AlertDescription>
-          远程记忆库按需检索，搜索词会发送给所选来源。来源配置位于数据目录
-          memory-remotes.json；认证从环境变量读取。配置方法见
-          README。远程内容经显式保存后才会进入本地项目。
+          远程检索会将搜索词发送给所选来源，内容经显式保存后才进入本地项目。
+          <details className="source-setup">
+            <summary>来源配置方法</summary>
+            <p>
+              来源配置位于数据目录
+              memory-remotes.json；认证从环境变量读取。配置方法见 README。
+            </p>
+          </details>
         </AlertDescription>
       </Alert>
       <Dialog
