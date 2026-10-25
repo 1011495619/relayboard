@@ -10,3 +10,12 @@ output/playwright/
 /lib/
 .DS_Store
 *.tsbuildinfo
+
+# Local release artifacts, evidence and credentials
+/releases/
+/evidence/
+/artifacts/
+/work/
+.env
+.env.*
+!.env.example

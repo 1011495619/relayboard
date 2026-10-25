@@ -9,6 +9,7 @@
     "tests/**/*.ts",
     "server/**/*.ts",
     "bin/**/*.ts",
-    "integrations/**/*.ts"
+    "integrations/**/*.ts",
+    "scripts/**/*.ts"
   ]
 }
