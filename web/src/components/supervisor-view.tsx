@@ -65,6 +65,7 @@ import {
   EmptyDescription,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DiagnosisBlock } from "./verification-panel";
 
 const modes = {
   observe: "仅观察",
@@ -284,6 +285,14 @@ export function SupervisorView({
             <CardContent className="flex flex-col gap-3">
               {incident.resolution && (
                 <p className="supervisor-resolution">{incident.resolution}</p>
+              )}
+              {incident.status === "resolved" && (
+                <p className="muted">
+                  告警解除只说明告警状态变化，不等于恢复、接手或验收成功。
+                </p>
+              )}
+              {incident.diagnosis && (
+                <DiagnosisBlock diagnosis={incident.diagnosis} />
               )}
               <details className="supervisor-details">
                 <summary>

@@ -168,6 +168,10 @@ import {
   EvidenceHistory,
   RecoveryPanel,
 } from "./components/task-reliability.tsx";
+import {
+  VerificationPanel,
+  DiagnosisBlock,
+} from "./components/verification-panel";
 import "./style.css";
 class ApiError extends Error {
   code?: string;
@@ -2668,6 +2672,44 @@ function TaskDrawer({
       query("evidence_history", { task_id: t.id, offset, snapshot_id }),
     [t.id],
   );
+  const loadProfiles = useCallback(
+    () => query("verification_profiles", {}),
+    [],
+  );
+  const loadVerificationHistory = useCallback(
+    (offset: number) =>
+      query("verification_history", { task_id: t.id, offset }),
+    [t.id],
+  );
+  const loadVerificationExecution = useCallback(
+    (executionId: string) =>
+      query("verification_execution", { execution_id: executionId }),
+    [],
+  );
+  const loadVerificationLog = useCallback(
+    (executionId: string, cursor?: string) =>
+      query("verification_log", {
+        execution_id: executionId,
+        ...(cursor ? { cursor } : {}),
+      }),
+    [],
+  );
+  const startVerification = useCallback(
+    (profileId: string) =>
+      command("verification_start", {
+        task_id: t.id,
+        run_id: currentRun?.id ?? "",
+        claim_epoch: t.claim_epoch,
+        profile_id: profileId,
+      }),
+    [t.id, t.claim_epoch, currentRun?.id],
+  );
+  const notifyDelivery: Notify = useCallback((message, error) => {
+    toastManager.add({
+      title: message,
+      type: error ? "error" : "success",
+    });
+  }, []);
   const owner = data.runs.find((r) => r.id === t.owner_run_id),
     children = data.tasks.filter((c) => c.parent_id === t.id),
     parent = data.tasks.find((p) => p.id === t.parent_id),
@@ -3065,15 +3107,25 @@ function TaskDrawer({
                 }
               />
             )}
+          <VerificationPanel
+            task={t}
+            currentRun={currentRun}
+            loadProfiles={loadProfiles}
+            loadHistory={loadVerificationHistory}
+            loadExecution={loadVerificationExecution}
+            loadLog={loadVerificationLog}
+            startVerification={startVerification}
+            notify={notifyDelivery}
+          />
           <EvidenceHistory
             taskId={t.id}
             version={t.version}
             load={loadEvidence}
           />
           <section className="detail-section">
-            <h3>成果与当前验证集合</h3>
+            <h3>交付成果</h3>
             <p className="muted">
-              新的完整验证集合会替代当前集合，旧失败仍保留。测试结果由执行者报告。
+              验证证据与来源见上方「交付证据与待决事项」，这里列出交付物。
             </p>
             {t.artifacts.map((a) => (
               <div className="artifact-item" key={a.path}>
@@ -3085,24 +3137,8 @@ function TaskDrawer({
                 <span>{a.kind}</span>
               </div>
             ))}
-            {t.verification.map((v) => (
-              <div
-                className={`verification-item ${v.passed ? "passed" : "failed"}`}
-                key={v.command}
-              >
-                {v.passed ? (
-                  <CheckCircle2 size={15} />
-                ) : (
-                  <AlertCircle size={15} />
-                )}
-                <div>
-                  <code>{v.command}</code>
-                  <p>{v.result}</p>
-                </div>
-              </div>
-            ))}
-            {!t.artifacts.length && !t.verification.length && (
-              <p className="muted">尚未提交成果和验证证据。</p>
+            {!t.artifacts.length && (
+              <p className="muted">尚未提交交付物。</p>
             )}
           </section>
           <section className="detail-section">
