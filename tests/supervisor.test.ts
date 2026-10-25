@@ -404,6 +404,31 @@ test("native grandchildren are inspected with independent identity; waiting coor
   assert.ok(f.starts.some((x) => x.task_id === claimed.id));
 });
 
+test("incident diagnosis is emitted with process_unknown category and never changes task state", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  f.configure();
+  f.s.store.transaction(() =>
+    f.s.update("run", f.s.run(f.run.id), {
+      process: { status: "unknown", source: "adapter" },
+    }),
+  );
+  f.advance(61000);
+  await f.supervisor.tick();
+  const events = f.s.store
+    .events(f.project.id)
+    .filter((e) => e.type === "supervisor.diagnosis");
+  assert.ok(events.length >= 1);
+  const d = events.at(-1)!.diagnosis as {
+    category: string;
+    next_action: { kind: string };
+  };
+  assert.equal(d.category, "process_unknown");
+  assert.equal(d.next_action.kind, "confirm_stop");
+  assert.equal(f.s.task(f.task.id).status, "doing");
+  assert.equal(f.s.task(f.task.id).owner_run_id, f.run.id);
+});
+
 test("a policy pause during asynchronous CLI preflight prevents launch and retains the reserved handoff", async (t) => {
   const f = fixture();
   t.after(() => f.store.close());

@@ -1,5 +1,5 @@
 import type { Service } from "./domain.ts";
-import { errorInfo } from "../bin/errors.ts";
+import { errorInfo, diagnoseThrown } from "../bin/errors.ts";
 
 /** Bounded local dispatcher. Only explicitly enabled Runs may start paid CLI work. */
 export interface SchedulerRunner {
@@ -136,6 +136,15 @@ export class Scheduler {
               run_id: run.id,
               task_id: task.id,
               summary: errorInfo(error).message,
+            });
+            s.emit(run.project_id, "dispatch.diagnosis", {
+              run_id: run.id,
+              task_id: task.id,
+              diagnosis: diagnoseThrown(error, {
+                runtime: latest.runtime,
+                phase: "spawn",
+                source: "adapter_observed",
+              }),
             });
           });
         }

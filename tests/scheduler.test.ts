@@ -198,3 +198,32 @@ test("live handles and unknown processes block automatic redispatch; launch erro
   f.scheduler.tick();
   assert.equal(f.s.run(run.id).dispatch!.launches, 1);
 });
+
+test("launch errors persist a structured dispatch diagnosis without altering task state", (t) => {
+  const f = fixture(t),
+    run = f.register();
+  f.create();
+  f.s.execute("run_dispatch", {
+    run_id: run.id,
+    enabled: true,
+    max_launches: 1,
+    note: "single attempt",
+  });
+  f.runner.start = () => {
+    throw Object.assign(new Error("fixture CLI missing"), {
+      code: "CLI_UNAVAILABLE",
+    });
+  };
+  f.scheduler.tick();
+  const events = f.s.store
+    .events(f.p.id)
+    .filter((e) => e.type === "dispatch.diagnosis");
+  assert.ok(events.length >= 1);
+  const d = events.at(-1)!.diagnosis as {
+    category: string;
+    next_action: { kind: string };
+  };
+  assert.equal(d.category, "configuration");
+  assert.equal(d.next_action.kind, "configure");
+  assert.equal(f.s.run(run.id).dispatch!.enabled, false);
+});

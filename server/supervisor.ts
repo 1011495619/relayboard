@@ -3,14 +3,19 @@ import { AppError } from "./domain.ts";
 import type { CommandArgs, QueryArgs } from "./schemas.ts";
 import type {
   Task,
+  Run,
   SupervisorIncident,
   SupervisorPolicy,
   SupervisorStatus,
+  RuntimeDiagnosis,
 } from "./types.ts";
 import type { RuntimeInfo } from "./runtimes.ts";
 import { supportsLaunch } from "./runtimes.ts";
 import { digest } from "./workflow.ts";
-import { errorInfo } from "../bin/errors.ts";
+import {
+  errorInfo,
+  classifyRuntimeError,
+} from "../bin/errors.ts";
 
 const notice =
   "巡视覆盖所有项目和原生子孙任务。心跳和进程输出不计为任务进展；提醒持久保存，但外部聊天窗口需主动读取。付费执行只按 recover 策略与预算启动，未知旧进程须先核实。";
@@ -196,11 +201,29 @@ export class Supervisor {
     });
     return result;
   }
+  /** Explainable diagnosis for a detected incident; never mutates task state. */
+  private diagnoseIncident(
+    task: Task,
+    reason: string,
+    at: number,
+  ): RuntimeDiagnosis {
+    const owner = task.owner_run_id ? this.service.run(task.owner_run_id) : null;
+    return classifyRuntimeError({
+      code:
+        owner?.process?.status === "unknown"
+          ? "PROCESS_UNCONFIRMED"
+          : undefined,
+      message: reason,
+      phase: "supervisor",
+      process_status: owner?.process?.status || owner?.status || undefined,
+      observed_at: iso(at),
+      source: owner?.process ? "process_observed" : "rule_inferred",
+    });
+  }
   private inspect(
     task: Task,
     at: number,
-  ): { incident: SupervisorIncident; policy: SupervisorPolicy } | null {
-    const s = this.service,
+  ): { incident: SupervisorIncident; policy: SupervisorPolicy } | null {    const s = this.service,
       signature = progressSignature(task),
       key = id(task);
     let state = s.store.get("supervisor_state", key);
@@ -329,14 +352,25 @@ export class Supervisor {
         run_id: task.owner_run_id,
         summary: reason,
       });
+      s.emit(task.project_id, "supervisor.diagnosis", {
+        task_id: task.id,
+        run_id: task.owner_run_id,
+        diagnosis: this.diagnoseIncident(task, reason, at),
+      });
     } else if (
       incident.reason !== reason ||
       incident.owner_run_id !== task.owner_run_id
-    )
+    ) {
       incident = this.patch(incident, {
         reason,
         owner_run_id: task.owner_run_id,
       });
+      s.emit(task.project_id, "supervisor.diagnosis", {
+        task_id: task.id,
+        run_id: task.owner_run_id,
+        diagnosis: this.diagnoseIncident(task, reason, at),
+      });
+    }
     if (incident.status === "recovering") {
       const replacement = incident.replacement_run_id
         ? s.run(incident.replacement_run_id)
@@ -651,12 +685,22 @@ export class Supervisor {
         }),
       );
     } catch (error) {
-      s.store.transaction(() =>
+      s.store.transaction(() => {
         this.escalate(
           s.get("supervisor_incident", incident.id),
           `接手启动失败：${errorInfo(error).message.slice(0, 800)}`,
-        ),
-      );
+        );
+        s.emit(policy.project_id, "supervisor.diagnosis", {
+          task_id: incident.task_id,
+          run_id: incident.owner_run_id,
+          diagnosis: classifyRuntimeError({
+            code: errorInfo(error).code,
+            message: errorInfo(error).message,
+            phase: "spawn",
+            source: "adapter_observed",
+          }),
+        });
+      });
     }
   }
 }

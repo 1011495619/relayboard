@@ -28,7 +28,11 @@ import {
 export type { RunnerProfile } from "./runtimes.ts";
 import { runtimeRoot, runtimeExtension, runtimeNodeArgs } from "./config.ts";
 import type { ProcessInfo } from "./types.ts";
-import { errorInfo } from "../bin/errors.ts";
+import {
+  errorInfo,
+  classifyRuntimeError,
+  diagnoseThrown,
+} from "../bin/errors.ts";
 import { AppError, type Service } from "./domain.ts";
 
 const exec = promisify(execFile);
@@ -391,6 +395,18 @@ export class Runner {
                     ? `客户端模型请求失败：${modelError}`
                     : "客户端模型请求已恢复；任务进展仍需实际报告",
                 });
+                if (modelError)
+                  s.emit(run.project_id, "runner.diagnosis", {
+                    run_id: run.id,
+                    task_id,
+                    diagnosis: classifyRuntimeError({
+                      code: "",
+                      message: modelError,
+                      runtime: run.runtime,
+                      phase: "model",
+                      source: "adapter_observed",
+                    }),
+                  });
               });
             }
             if (providerId)
@@ -427,6 +443,29 @@ export class Runner {
         const savedProgress =
           savedTask.checkpoint?.run_id === run.id &&
           savedTask.checkpoint.at >= processInfo.started_at!;
+        const diagnosis = record.lastModelError
+          ? classifyRuntimeError({
+              message: record.lastModelError,
+              runtime: current.runtime,
+              phase: "model",
+              source: "adapter_observed",
+            })
+          : error
+            ? diagnoseThrown(error, {
+                runtime: current.runtime,
+                phase: "spawn",
+                source: "adapter_observed",
+              })
+            : code !== 0
+              ? classifyRuntimeError({
+                  message: record.stderrTail.trim().slice(-400) || undefined,
+                  runtime: current.runtime,
+                  phase: "exit",
+                  exit_code: code,
+                  process_status: record.stopped ? "stopped" : "failed",
+                  source: "process_observed",
+                })
+              : null;
         s.update("run", current, {
           process: {
             ...current.process,
@@ -454,6 +493,12 @@ export class Runner {
           },
           last_seen_at: stamp(),
         });
+        if (diagnosis)
+          s.emit(run.project_id, "runner.diagnosis", {
+            run_id: run.id,
+            task_id,
+            diagnosis,
+          });
         s.emit(run.project_id, "runner.exited", {
           run_id: run.id,
           task_id,
