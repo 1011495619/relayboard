@@ -54,6 +54,7 @@ const workHandle = z
 const dependencyReceipt = z
   .object({ task_id: id, revision: text.min(1), note: text.min(1) })
   .strict();
+const workView = z.enum(["full", "action"]).default("full");
 export const taskFields = {
   title: short,
   execution: executionPlan.nullable().optional(),
@@ -181,15 +182,18 @@ export const commands = {
   },
   work_start: {
     description:
-      "Preferred entry: resume your assigned task or atomically claim eligible work. Returns a recovery checklist and exactly one next action. Register your own Run first. Never takes over another owner.",
-    schema: z.object({ run_id: id, task_id: id.optional() }).strict(),
+      "Preferred entry: resume your assigned task or atomically claim eligible work. Returns a recovery checklist and exactly one next action. Register your own Run first. Never takes over another owner. Pass view=action for a compact guide that omits full contract/context/dependency bodies; still supplement omissions before recover.",
+    schema: z
+      .object({ run_id: id, task_id: id.optional(), view: workView })
+      .strict(),
   },
   work_report: {
     description:
-      "Preferred progress entry: use the exact current guide handle. Recover actual files and acknowledge contracts first; then report progress, the next ordered step, blockers, verification or submission. Does not execute tests or accept work on your behalf.",
+      "Preferred progress entry: use the exact current guide handle. Recover actual files and acknowledge contracts first; then report progress, the next ordered step, blockers, verification or submission. Does not execute tests or accept work on your behalf. Pass view=action to receive the next handle and action directly, skipping a pure work_next refresh; still supplement omissions before recover.",
     schema: z
       .object({
         handle: workHandle,
+        view: workView,
         kind: z.enum([
           "recover",
           "wait",
@@ -664,6 +668,7 @@ export const queries = {
       run_id: id,
       task_id: id,
       max_chars: z.number().int().min(1500).max(24000).default(10000),
+      view: workView,
     })
     .strict(),
   projects: z.object({}).strict(),

@@ -5,13 +5,19 @@ MCP, HTTP and CLI use the same shared service. A local stdio bridge does not cre
 ## Daily execution
 
 1. `relay_agent_register {project_id, name, runtime, workdir, parent_run_id?}` → retain `run.id`.
-2. `relay_work_start {run_id, task_id?}` → resume own task or atomically claim eligible work; read returned guide.
+2. `relay_work_start {run_id, task_id?, view?}` → resume own task or atomically claim eligible work; read returned guide.
 3. At recover, inspect actual files/processes and full required decisions; receive required dependency artifacts.
-4. `relay_work_report {handle, kind:"recover", summary, observed, read_decision_ids, dependency_receipts}` → return refreshed guide.
+4. `relay_work_report {handle, kind:"recover", summary, observed, read_decision_ids, dependency_receipts, view?}` → return refreshed guide.
 5. Execute current step; `relay_work_report {handle, kind:"step", step_id, summary, artifacts?}`. Use progress for partial work, blocked for obstacles, verify for real checks and submit for delivery.
-6. `relay_work_next {run_id, task_id, max_chars?}` is a focused read at any point. Use its latest handle for the next report.
+6. `relay_work_next {run_id, task_id, max_chars?, view?}` is a focused read at any point. Use its latest handle for the next report.
 
 The handle includes task/Run IDs, claim epoch, task version and a context_version digest. Copy all returned fields unchanged. Never cache it across reports, contract/plan changes or handoff. A new chat registers a new Run; supplying the old logical agent identity does not transfer claims. `work_start` does not take another Run's task.
+
+## Full vs action view
+
+`work_start`, `work_next` and `work_report` accept optional `view: "full" | "action"`; default `full` keeps 0.7 clients compatible. `action` returns a compact guide that omits the full task, handoff context, contract bodies, dependency bodies and artifacts/verification history. It keeps `handle`, `next_action`, `current_step`, `completed_steps`, `references`, `dependency_page`, `request_page`, `warnings`, `choices`, `omissions` and `truncated`. `work_report(view:"action")` returns the next handle, so a caller can proceed without an extra pure-refresh `work_next`.
+
+`action` is a delivery optimization, not a bypass: the same state machine, handle/context_version checks, old-epoch fencing, dependency receipts, request closure and independent acceptance apply. `omissions` names what was not repeated; read those pages (decisions/dependencies/requests/context) before recover and never treat compact delivery as an implicit read. Do not present response character counts as token savings.
 
 ## Guide stages
 

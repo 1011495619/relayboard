@@ -246,6 +246,23 @@ JSON
 | `relay_work_next` | 只读获取当前阶段、下一步、核对清单、契约、依赖和警告。 |
 | `relay_work_report` | 使用最新 handle 报告恢复、进展、步骤、阻塞、验证或提交。 |
 
+三个入口都接受可选 `view: "full" | "action"`，缺省 `full` 保持 0.7 客户端兼容。`action` 返回精简指引：不重复完整 task/接手包/契约/依赖/artifacts 正文，但保留 handle、next_action、当前步骤、`dependency_page`/`request_page`、`omissions`、`references` 和警告；`work_report(view:"action")` 直接返回下一 handle，不必再做一次纯刷新的 `work_next`。`omissions` 中列出的契约、依赖和请求仍须逐页补读，服务不会因紧凑视图默认已读。
+
+最短可运行示例（先登记 Run，再用 action 视图走完领取与恢复）：
+
+```bash
+relayboard call relay_agent_register - <<'JSON'
+{"project_id":"PROJECT_ID","name":"执行会话","runtime":"other","workdir":"/abs/path","capabilities":["testing"]}
+JSON
+# 记下返回的 run.id，然后：
+relayboard call relay_work_start - <<'JSON'
+{"run_id":"YOUR_RUN_ID","task_id":"TASK_ID","view":"action"}
+JSON
+relayboard call relay_work_report - <<'JSON'
+{"handle":{"task_id":"TASK_ID","run_id":"YOUR_RUN_ID","claim_epoch":1,"task_version":1,"context_version":"FROM_GUIDE"},"view":"action","kind":"recover","summary":"已核对现场、契约与依赖成果","observed":"实际目录/分支/进程/成果核验","read_decision_ids":[],"dependency_receipts":[]}
+JSON
+```
+
 ```bash
 relayboard call relay_work_start - <<'JSON'
 {"run_id":"YOUR_RUN_ID","task_id":"TASK_ID"}

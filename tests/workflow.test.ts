@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { Store } from "../server/store.ts";
 import { Service } from "../server/domain.ts";
 import type { CommandInput } from "../server/schemas.ts";
-import type { WorkGuide, Task } from "../server/types.ts";
+import type { WorkGuide, ActionGuide, Task } from "../server/types.ts";
 
 const errorCode = (code: string) => (error: unknown) =>
   error instanceof Error && "code" in error && error.code === code;
@@ -758,4 +758,148 @@ test("a long release note cannot break the whole-guide character budget on recla
   });
   g = f.s.execute("work_start", { run_id: b.id, task_id: task.id });
   assert.ok(JSON.stringify(g).length <= g.char_budget);
+});
+
+test("action view compresses the daily path and returns the next handle without a work_next refresh", (t) => {
+  const f = fixture(t);
+  const run = f.register();
+  const task = f.create();
+  let g = f.s.execute("work_start", {
+    run_id: run.id,
+    task_id: task.id,
+    view: "action",
+  }) as unknown as ActionGuide;
+  assert.equal(g.task_id, task.id);
+  assert.equal("task" in g, false);
+  assert.ok(g.handle);
+  assert.ok(g.next_action);
+  assert.deepEqual(g.references, { project_id: f.p.id, task_id: task.id });
+  assert.ok(g.omissions.some((o: string) => o.includes("接手包")));
+  assert.equal(g.stage, "recover");
+  const report = (
+    guide: ActionGuide,
+    kind: CommandInput<"work_report">["kind"],
+    extra: Record<string, unknown> = {},
+  ) =>
+    f.s.execute("work_report", {
+      handle: guide.handle!,
+      view: "action",
+      kind,
+      summary: "实际结果已记录",
+      ...extra,
+    }) as unknown as ActionGuide;
+  g = report(g, "recover", {
+    observed: `检查目录${f.dir}、分支、改动与进程`,
+    read_decision_ids: [],
+    dependency_receipts: [],
+  });
+  assert.equal(g.stage, "execute");
+  assert.equal(g.current_step!.id, "write");
+  g = report(g, "step", { step_id: "write" });
+  assert.equal(g.current_step!.id, "check");
+  g = report(g, "step", { step_id: "check" });
+  assert.equal(g.stage, "verify");
+  g = report(g, "verify", {
+    artifacts: [{ path: "result.txt" }],
+    verification: [{ command: "test", result: "pass", passed: true }],
+  });
+  assert.equal(g.stage, "submit");
+  g = report(g, "submit", {});
+  assert.equal(g.stage, "review");
+  assert.equal(f.s.task(task.id).status, "review");
+});
+
+test("action guide keeps omissions, references and dependency pages for supplementation", (t) => {
+  const f = fixture(t);
+  const run = f.register();
+  let dep = f.create({ title: "依赖任务", execution: null, scopes: ["dependency.txt"] });
+  dep = f.s.execute("task_claim", {
+    task_id: dep.id,
+    run_id: run.id,
+    expected_version: dep.version,
+  });
+  dep = f.s.execute("task_checkpoint", {
+    task_id: dep.id,
+    run_id: run.id,
+    claim_epoch: dep.claim_epoch,
+    summary: "完成",
+    artifacts: [{ path: "dep-commit", kind: "commit" }],
+    verification: [{ command: "check", result: "passed", passed: true }],
+  });
+  dep = f.s.execute("task_submit", {
+    task_id: dep.id,
+    run_id: run.id,
+    claim_epoch: dep.claim_epoch,
+    summary: "交付",
+  });
+  f.s.execute("task_review", {
+    task_id: dep.id,
+    expected_version: dep.version,
+    accepted: true,
+    human_review: true,
+    note: "人工核对",
+  });
+  const task = f.create({ depends_on: [dep.id] });
+  f.s.execute("decision_record", {
+    project_id: f.p.id,
+    title: "行动契约",
+    body: "不可重复的契约细节XYZ",
+    task_ids: [task.id],
+  });
+  const g = f.s.execute("work_start", {
+    run_id: run.id,
+    task_id: task.id,
+    view: "action",
+  }) as unknown as ActionGuide;
+  assert.ok(g.omissions.some((o: string) => o.includes("契约")));
+  assert.ok(g.omissions.some((o: string) => o.includes("依赖")));
+  assert.equal(g.dependency_page.total, 1);
+  assert.ok(!JSON.stringify(g).includes("不可重复的契约细节XYZ"));
+});
+
+test("relay_api exposes view for work_start, work_report and work_next", (t) => {
+  const f = fixture(t);
+  for (const name of ["work_start", "work_report", "work_next"]) {
+    const res = f.s.query("api", { name });
+    assert.equal(res.items.length, 1);
+    assert.ok(res.items[0].fields.includes("view"));
+  }
+});
+
+test("action view is not a bypass: recovery and ordered steps are still enforced", (t) => {
+  const f = fixture(t);
+  const run = f.register();
+  const task = f.create();
+  const g = f.s.execute("work_start", {
+    run_id: run.id,
+    task_id: task.id,
+    view: "action",
+  }) as unknown as ActionGuide;
+  assert.equal(g.stage, "recover");
+  assert.throws(
+    () =>
+      f.s.execute("work_report", {
+        handle: g.handle!,
+        view: "action",
+        kind: "step",
+        step_id: "write",
+        summary: "未恢复",
+      }),
+    errorCode("RECOVERY_REQUIRED"),
+  );
+});
+
+test("full work_next stays compatible while action work_next omits full bodies", (t) => {
+  const f = fixture(t);
+  const run = f.register();
+  const task = f.create();
+  const full = f.s.query("work_next", { run_id: run.id, task_id: task.id });
+  assert.ok(full.task);
+  const action = f.s.query("work_next", {
+    run_id: run.id,
+    task_id: task.id,
+    view: "action",
+  }) as unknown as ActionGuide;
+  assert.equal(action.task_id, task.id);
+  assert.equal("task" in action, false);
 });

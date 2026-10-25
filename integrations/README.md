@@ -35,6 +35,8 @@ JSON
 
 `agent_register` 返回 `{agent, run}`，领取任务、检查点、收件箱应使用 **`run.id`**。每个子会话都读取自己的值。
 
+`work_start`/`work_next`/`work_report` 支持可选 `view: "full" | "action"`（缺省 full）。`view:"action"` 返回精简指引，不重复完整 task/接手包/契约/依赖/artifacts 正文，但保留 handle、next_action、当前步骤、分页计数、omissions 与 references；`work_report(view:"action")` 直接返回下一 handle，可省掉一次纯刷新 `work_next`。omissions 列出的契约、依赖和请求仍须补读，服务不会因紧凑视图默认已读。
+
 ## 统一恢复入口
 
 登记后用 `work_start` 取得阶段和下一步。检查顶层 truncated/omissions/char_budget（整个指引 JSON 有效预算至少 6000 字符）及 context.truncated，任一层省略都要补读。先读目标、约束、警告、契约与依赖；核对实际 cwd、分支、改动、进程和成果。使用返回的最新 `handle` 调用 `work_report`，`kind: "recover"` 填实际观察、完整读过的 `read_decision_ids` 和依赖成果实际进入本地后的 `dependency_receipts`。receipt 的 revision 使用 guide.dependencies 中的服务成果摘要（并非 Git hash），note 说明实际如何接收并确认本地已有成果。指引省略决定时，按 task_id 分页读取全部相关决定再确认。依赖省略时用 work_dependencies {task_id, offset, limit} 读全每项 revision，未处理请求用 work_requests 同参数读全（含祖先和旧 owner 请求）；两者返回 items/total/next_offset，翻页到 null。message_ack 仅已读，处理后 message_resolve {message_id, run_id, note} 记结论，现 owner 可处理继承请求。确认恢复后只做当前步骤，报告其观察结果，再读下一步。

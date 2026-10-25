@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import type { Service } from "./domain.ts";
-import type { Task, Decision, WorkGuide, WorkflowState } from "./types.ts";
+import type {
+  ActionGuide,
+  Task,
+  Decision,
+  WorkGuide,
+  WorkView,
+  WorkflowState,
+} from "./types.ts";
 import { observeWorkspace } from "./workspace.ts";
 
 export const digest = (value: unknown) =>
@@ -186,6 +193,16 @@ export function workGuide(
   runId: string,
   task: Task | null,
   maxChars = 10000,
+  view: WorkView = "full",
+): WorkGuide | ActionGuide {
+  const guide = buildGuide(service, runId, task, maxChars);
+  return view === "action" ? actionGuide(guide, task) : boundGuide(guide);
+}
+function buildGuide(
+  service: Service,
+  runId: string,
+  task: Task | null,
+  maxChars = 10000,
 ): WorkGuide {
   const run = service.run(runId);
   const guide: WorkGuide = {
@@ -224,7 +241,7 @@ export function workGuide(
         eligible: e.eligible,
         reasons: e.reasons,
       }));
-    return boundGuide(guide);
+    return guide;
   }
   service.sameProject(run.project_id, "task", task.id);
   guide.context = service.context({
@@ -336,7 +353,7 @@ export function workGuide(
     guide.warnings.push(
       "先登记有效 Run；任务归其他执行者时由负责人明确交接，读取指南不会转移归属",
     );
-    return boundGuide(guide);
+    return guide;
   }
   guide.handle = {
     task_id: task.id,
@@ -497,7 +514,51 @@ export function workGuide(
     guide.headline = "验证已记录，可以提交独立验收";
     guide.next_action = report("submit", "提交当前成果，等待其他执行者验收");
   }
-  return boundGuide(guide);
+  return guide;
+}
+
+/** Compact action view of a built guide; same state machine, no second path. */
+function actionGuide(guide: WorkGuide, task: Task | null): ActionGuide {
+  const omissions = [
+    "接手包正文（relay_work_next 或 relay_project/relay_task）",
+    "任务范围与执行说明（relay_task 全文）",
+    "artifacts/verification 历史（relay_task）",
+  ];
+  if (guide.decisions.length > 0)
+    omissions.push("契约正文（relay_decisions 按 task_id 分页）");
+  if (guide.dependency_page.total > 0)
+    omissions.push("依赖正文与成果位置（relay_work_dependencies 分页）");
+  if (guide.request_page.total > 0)
+    omissions.push("任务请求正文（relay_work_requests 分页）");
+  const warnings = [
+    "action 视图省略完整契约/依赖/请求/接手包正文；按 omissions 与 references 补读后再报告，服务不因紧凑视图默认已读。",
+    ...guide.warnings,
+  ]
+    .slice(0, 10)
+    .map((w) => w.slice(0, 400));
+  return {
+    truncated: true,
+    omissions,
+    char_budget: guide.char_budget,
+    run_id: guide.run_id,
+    task_id: task?.id ?? null,
+    stage: guide.stage,
+    headline: guide.headline.slice(0, 500),
+    handle: guide.handle,
+    next_action: guide.next_action,
+    current_step: guide.current_step,
+    completed_steps: guide.completed_steps,
+    references: task
+      ? { project_id: task.project_id, task_id: task.id }
+      : null,
+    dependency_page: guide.dependency_page,
+    request_page: guide.request_page,
+    warnings,
+    choices: guide.choices.slice(0, 5).map((c) => ({
+      ...c,
+      reasons: c.reasons.slice(0, 3).map((r) => r.slice(0, 200)),
+    })),
+  };
 }
 
 /** Bound the entire MCP result, including metadata outside the Markdown packet. */

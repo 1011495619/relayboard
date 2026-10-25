@@ -735,7 +735,8 @@ export class Service {
         args.run_id,
         this.task(args.task_id),
         args.max_chars,
-      );
+        args.view,
+      ) as WorkGuide;
     }
     if (name === "project")
       return this.get("project", queries.project.parse(input).project_id);
@@ -966,7 +967,7 @@ export class Service {
         run_id: run.id,
         expected_version: task.version,
       });
-    return workGuide(this, run.id, task || null);
+    return workGuide(this, run.id, task || null, undefined, args.view) as WorkGuide;
   }
   work_report(args: CommandArgs<"work_report">): CommandResults["work_report"] {
     let task = this.task(args.handle.task_id);
@@ -1015,7 +1016,7 @@ export class Service {
         until: args.wait_until,
         summary: args.summary,
       });
-      return workGuide(this, run.id, task);
+      return workGuide(this, run.id, task, undefined, args.view) as WorkGuide;
     }
     const old = task.workflow || emptyWorkflow(task);
     let workflow = { ...old };
@@ -1164,7 +1165,7 @@ export class Service {
           claim_epoch: task.claim_epoch,
           summary: args.summary,
         });
-        return workGuide(this, run.id, task);
+        return workGuide(this, run.id, task, undefined, args.view) as WorkGuide;
       }
       if (args.ready_for_verification !== undefined)
         workflow.ready_for_verification = args.ready_for_verification;
@@ -1208,7 +1209,7 @@ export class Service {
       kind: args.kind,
       summary: args.summary,
     });
-    return workGuide(this, run.id, task);
+    return workGuide(this, run.id, task, undefined, args.view) as WorkGuide;
   }
   project_create(
     args: CommandArgs<"project_create">,
@@ -1622,7 +1623,7 @@ export class Service {
       "请先登记有效的新执行会话",
     );
     if (task.owner_run_id === target.id)
-      return workGuide(this, target.id, task);
+      return workGuide(this, target.id, task) as WorkGuide;
     ensure(
       task.owner_run_id,
       "HANDOFF_STATE",
@@ -1648,7 +1649,7 @@ export class Service {
       confirmed_stop: args.confirmed_stop,
       summary: args.reason,
     });
-    return workGuide(this, target.id, handed);
+    return workGuide(this, target.id, handed) as WorkGuide;
   }
   closeSystemNotices(
     task: Task,

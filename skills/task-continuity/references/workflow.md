@@ -1,6 +1,6 @@
 # Complete coordination workflow
 
-Daily execution is `agent_register` → `work_start` → read guide and inspect scene → `work_report recover` → current step → verification → submission. Each report uses the latest returned handle. Tool details and fallback: [protocol.md](protocol.md).
+Daily execution is `agent_register` → `work_start` → read guide and inspect scene → `work_report recover` → current step → verification → submission. Each report uses the latest returned handle. Pass `view:"action"` to work_start/work_next/work_report for the compact guide; it returns the next handle after report and omits full bodies, but its `omissions`/`references` still require supplementing contracts, dependencies and requests. Tool details and fallback: [protocol.md](protocol.md).
 
 ## Plan for a reader without the old chat
 

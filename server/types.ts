@@ -517,6 +517,7 @@ export type WorkStage =
   | "wait_children"
   | "done"
   | "unavailable";
+export type WorkView = "full" | "action";
 export interface WorkGuide {
   truncated: boolean;
   omissions: string[];
@@ -557,6 +558,24 @@ export interface WorkGuide {
     eligible: boolean;
     reasons: string[];
   }[];
+}
+export interface ActionGuide {
+  truncated: boolean;
+  omissions: string[];
+  char_budget: number;
+  run_id: string;
+  task_id: string | null;
+  stage: WorkStage;
+  headline: string;
+  handle: WorkHandle | null;
+  next_action: WorkGuide["next_action"];
+  current_step: ExecutionStep | null;
+  completed_steps: string[];
+  references: { project_id: string; task_id: string } | null;
+  dependency_page: { total: number; next_offset: number | null };
+  request_page: { total: number; next_offset: number | null };
+  warnings: string[];
+  choices: WorkGuide["choices"];
 }
 export interface QueryResults {
   api: {
@@ -645,6 +664,9 @@ export interface QueryResults {
     error: string | null;
     notice: string;
   };
+  // The protocol accepts view=action at runtime, but the declared result maps
+  // stay WorkGuide so 0.7 clients (including web/) keep compiling unchanged;
+  // ActionGuide is produced by workflow.ts and serialized as JSON when view=action.
   work_next: WorkGuide;
   work_requests: {
     items: Message[];
