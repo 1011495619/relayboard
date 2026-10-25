@@ -74,6 +74,29 @@
 
 第一次在只读任务上同时申请 `scopes:["README.md"]`，服务正确返回 `READ_ONLY_SCOPE`，流程在建任务处停止；该数据目录保留为 `mcp-baseline/data/`，没有重放写入。第二次改为只读且不申请写入 scope，并使用新的 `data-attempt2` 后通过。这是测试夹具修正，不是产品缺陷修复。
 
+### 持久可复现夹具 v2
+
+独立验收后已将参数化脚本持久保存到：
+
+`/Users/ansheng/Desktop/project/relayboard-evidence/evolution-rb002/replay/mcp_baseline.py`
+
+脚本 SHA-256：`161eb50c4152c015a3d6a1f95688d967db00857140411df4b9dbb31d7e69c540`。脚本仅使用 Python 标准库，子进程固定 `RELAYBOARD_RUNNERS=0`；`--repo` 指定当前编译源码，`--output-root` 指定仓库外证据根目录。每次自动创建带 UTC 时间和随机后缀的新输出/空数据目录；可选 `--run-name` 也只允许全新名称，任何已有结果都拒绝覆盖。
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 \
+  /Users/ansheng/Desktop/project/relayboard-evidence/evolution-rb002/replay/mcp_baseline.py \
+  --repo /Users/ansheng/Desktop/project/relayboard \
+  --output-root /Users/ansheng/Desktop/project/relayboard-evidence/evolution-rb002/replay/replays
+```
+
+每个新目录保存 `result.json`、`service.log` 和独立 `data/`；控制台另行保存。结果绑定脚本路径/SHA/argv、源码 HEAD、Node 版本和随机端口。后续 RB-005/RB-007 必须使用这份 v2 夹具，不得再引用 `/tmp` 原脚本或复用旧数据库。
+
+同一脚本已在 `replay-a`、`replay-b` 两个全新目录独立复跑，均最终 `done`、执行/审查 Run 不同、0 模型调用，结果内脚本 SHA 均为上述值。两次均为准备 6 次 JSON-RPC、执行到 submit 7 次、验收读取/review/终读 3 次，合计 16 次；`work_start` 到最终读取均为 10 次。A/B 总响应字符分别为 `240225/240224`，仅执行到 submit 分别为 `55129/55128`，恢复口径耗时分别为 `5.310/4.722 ms`。响应字符不是 token 或字节，耗时只是本机观测，不设性能承诺。
+
+统计边界固定为：`preparation` 含成功 readiness tools/list、建项目、3 Run、建任务；`execution_start_through_submit` 含 work_start、work_next、recover、progress、step、verify、submit；`acceptance_read_review_read` 含 task 读、独立 review、最终 task 读；`recovery_ms` 只含 work_next + recover，不含人工阅读、文件检查或模型时间。完整逐调用数据见两个 `result.json`。
+
+另以 `--run-name replay-a` 第三次调用验证防覆盖：脚本在启动服务前因目录已存在而非零退出，`no-overwrite.console.log` 保留错误；原 `replay-a/result.json` 前后 SHA-256 均为 `836e8f14c7510f4f76a2c08019bcb2b98f49dabc2d798695ca4ceac05a3c6ed7`。原失败尝试和 v1 历史证据继续保留，v2 数字另列，不回写旧结果。
+
 ## 6. 已有能力与真实模型证据边界
 
 - 当前已有：原子领取与 epoch、依赖独立验收、scope 内容指纹、完整当前验证集合及不可变历史、显式 review 身份、恢复步骤和契约分页、进程 unknown 保守处理、持久预算/冷却、关联通知闭环。

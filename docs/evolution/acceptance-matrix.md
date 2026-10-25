@@ -11,7 +11,7 @@
 | A002-1 | 读取 `git status`、worktree、HEAD、原 UI 任务与 Run | 来源、归属、未提交状态和写者边界可追溯 | `baseline.md` 1～2 节 |
 | A002-2 | 保存 tracked patch、全部修改/未跟踪文件快照并重新读取 | ZIP CRC、60 文件哈希、4 项 SHA256SUMS 全通过 | `20261025T164011Z/manifest.json`、`wip-files.zip`、`SHA256SUMS` |
 | A002-3 | 当前工作区运行 `npm run check` | 退出 0；类型/构建通过；114/114 | `20261025T164011Z/npm-run-check.log` |
-| A002-4 | 独立空库执行 HTTP MCP recover→progress→step→verify→submit→独立 review | 最终 done；review Run 不同；记录调用数/字符/人工介入/恢复口径 | `mcp-baseline/result.json` |
+| A002-4 | 用仓库外持久 v2 脚本在两个全新目录执行 HTTP MCP recover→progress→step→verify→submit→独立 review，并复用已有目录名 | 两次最终 done、review Run 不同、脚本 SHA 一致；旧目录拒绝覆盖且原结果哈希不变；记录调用/字符/人工介入/恢复口径 | `replay/mcp_baseline.py`、`replay/replays/replay-{a,b}/result.json`、`no-overwrite.console.log` |
 | A002-5 | 审阅三份文档和契约 decision | 字段、状态/错误、来源/失效、重启/旧库、配置、文件所有者及后续场景无缺口 | 本文、`contracts.md`、契约 decision ID |
 
 ## RB-003 · 服务执行验证
@@ -21,21 +21,25 @@
 | ID | 场景与操作 | 通过条件 |
 | --- | --- | --- |
 | A003-1 | 旧 0.7 数据副本重开；读取旧 task、verification、evidence_history | 原记录不变；新 `service_verification=null`、历史空页；现有测试回归通过 |
-| A003-2 | 配置 `check` profile，通过 MCP 仅传 `profile_id` 启动 | 实际 spawn 参数为配置的 command/args/cwd，不经过 shell；记录 profile 摘要和来源 |
+| A003-2 | 调用 profile 发现后配置 `check`，通过 MCP 仅传 `profile_id` 启动 | 发现接口返回实际配置路径、可用ID/摘要；实际 spawn 参数为配置的 command/args/cwd，不经过 shell；记录 profile 摘要和来源 |
 | A003-3 | 受控命令退出 0 | 终态 succeeded、exit_code=0、起止时间/cwd/日志/前后指纹完整；task 不自动 review/done |
 | A003-4 | 受控命令退出非 0 | failed 且保留退出码和日志；任何视图不显示通过 |
-| A003-5 | 短命令超过测试 timeout | timed_out；子进程被请求终止，未知终止结果不得写成 stopped |
-| A003-6 | 长运行中显式 stop | 已知终态才 stopped，signal/exit 信息真实；停止不确定为 unknown |
-| A003-7 | 不存在可执行文件、损坏 JSON、非法 cwd/profile | start_failed 或对应结构化错误；给出配置路径和修复动作，不创建假通过证据 |
+| A003-5 | 直接子进程派生后代并超过测试 timeout | 向进程组请求终止并核实可观察后代；未确认全退出则 timed_out/unknown + held，不得释放占用或写成 stopped |
+| A003-6 | 长运行中显式 stop，分别覆盖全退出和后代仍存活 | 全退出才 stopped/released；仍有后代或结果不确定则 unknown/held，signal/exit 信息真实 |
+| A003-7 | 不存在可执行文件、损坏 JSON、非法 cwd/profile；调用 profile 发现 | start 给对应结构化错误；发现接口仍返回实际路径、valid=false/可用ID及修复信息，不创建假通过证据 |
 | A003-8 | 输出超过小上限 | 进程终态准确，log 有界且 `output_truncated=true`，日志 SHA/字节数一致 |
+| A003-8a | 用 execution_id 分页读取含中文/emoji及非法UTF-8的日志；覆盖运行中、capture截断和终态 | 只按ID读取；游标不切断码点、非法字节replacement可计数；运行中complete=false，capture缺失持续可见，终态完整EOF才complete=true |
+| A003-8b | 跨execution/篡改游标、任意路径输入、日志删除/不可读、无令牌或跨项目读取 | 分别拒绝cursor/path/鉴权；丢失返回VERIFICATION_LOG_UNAVAILABLE而非空成功，执行历史保留 |
 | A003-9 | 执行中修改 scope 内文件，退出 0 | freshness=stale，含 `scope_changed_during_run`，不得 current |
 | A003-10 | 成功后修改 scope 外文件或仅产生无关 HEAD 变化 | scope 内容未变时证据仍 current；revision 仅作来源 |
 | A003-11 | 成功后修改 scope 内文件 | stale + `scope_changed_after_run`，列出变更原因 |
 | A003-12 | 成功后变更依赖 receipt、profile 或 owner/epoch | 分别得到 dependency/profile/owner 失效原因；旧执行历史仍可查 |
-| A003-13 | 运行中关闭并重开服务/数据库 | 记录转 unknown，不能变 succeeded；重跑生成新 execution |
+| A003-13 | 运行中关闭并重开服务/数据库，未reconcile直接start | 记录转unknown + reservation held，不能变succeeded；再次start/同目录交接与冲突写入被阻断 |
+| A003-13a | 服务异常退出但保留真实受控旧检查及后代存活，再启动服务 | 核实前旧检查仍只运行一份，无重复执行/冲突写入；历史始终unknown，绝不伪装stopped |
+| A003-13b | confirmed_stopped与isolated两种reconcile，含旧version、错误owner、幂等重放 | 确认停止需实际后代证据和confirmed_stop；隔离需不同realpath且旧目录仍held；均留审计，旧历史不变，新执行新ID |
 | A003-14 | 同 request_id 同参数重试；同 ID 不同参数；并发启动两个检查 | 首种返回原记录；次种幂等冲突；并发只一个运行，另一个 VERIFICATION_RUNNING |
 | A003-15 | 非 owner、旧 epoch、跨项目读取或越权 stop | 既有归属/epoch/项目守卫拒绝；无状态篡改 |
-| A003-16 | HTTP MCP 与 REST 各启动/读取一次，重开库分页历史 | 两入口领域语义一致；Agent 自报和服务执行来源分别展示/读取 |
+| A003-16 | HTTP MCP 与 REST 各执行profile发现、启动/详情/日志读取，重开库分页历史 | 两入口领域语义和鉴权一致；Agent自报和服务执行来源分别展示/读取，摘要有开始时间/version/profile摘要 |
 | A003-17 | `npm run check` | 全绿；新增测试覆盖以上行为而非只测类型 |
 
 ## RB-004 · 恢复诊断
@@ -59,7 +63,7 @@
 
 ## RB-005 · 日常协议减负
 
-前置：RB-003/004 已验收并接收精确成果。使用 RB-002 的隔离夹具和相同统计边界。
+前置：RB-003/004 已验收并接收精确成果。使用 RB-002 的仓库外持久 v2 隔离夹具、脚本哈希和相同统计边界。
 
 | ID | 场景与操作 | 通过条件 |
 | --- | --- | --- |
@@ -81,7 +85,8 @@
 | ID | 场景与操作 | 通过条件 |
 | --- | --- | --- |
 | A006-1 | 构造 Agent 自报通过但无服务执行 | 明确“Agent 自报”，不冒充服务验证 |
-| A006-2 | 构造服务 running/succeeded/failed/timed_out/stopped/start_failed/unknown | 每种状态文案、颜色、日志和动作符合契约；unknown 非成功 |
+| A006-2 | 构造服务 running/succeeded/failed/timed_out/stopped/start_failed/unknown | 每种状态文案、颜色、日志和动作符合契约；unknown/held非成功，开始时间/version/profile摘要直接来自summary |
+| A006-2a | 打开profile配置/错误和日志分页；覆盖运行中、截断、多字节、丢失与刷新 | 使用verification_profiles和verification_log，不读任意路径；配置错误可操作，日志完整性与加载状态准确 |
 | A006-3 | 构造 scope/dependency/profile/owner 失效 | 显示具体 stale 原因和重新验证；current 仍待独立验收 |
 | A006-4 | 提交后未 review 与独立 review 后 | 明确待验收/已验收及 reviewer；提交不冒充验收 |
 | A006-5 | 六类诊断和告警解除 | 分类、置信度、证据、next_action 可见；不显示虚假接手成功 |
