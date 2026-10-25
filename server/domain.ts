@@ -32,6 +32,8 @@ import {
   handleIncident,
 } from "./supervisor.ts";
 import { supportsLaunch } from "./runtimes.ts";
+import { VerificationService } from "./verification.ts";
+import { defaultDataDir } from "./config.ts";
 import { commands, queries } from "./schemas.ts";
 import type {
   CommandName,
@@ -124,9 +126,18 @@ function scopePath(s: string) {
 export class Service {
   readonly store: Store;
   readonly listeners: Set<(event: RelayEvent) => void>;
-  constructor(store: Store) {
+  private dataDir: string;
+  private verificationService: VerificationService | null = null;
+  constructor(store: Store, options: { dataDir?: string } = {}) {
     this.store = store;
     this.listeners = new Set();
+    this.dataDir = options.dataDir ?? defaultDataDir();
+  }
+  get verification(): VerificationService {
+    return (this.verificationService ??= new VerificationService(
+      this,
+      this.dataDir,
+    ));
   }
   get<K extends RecordKind>(kind: K, id: string): RecordMap[K] {
     const item = this.store.get(kind, id);
@@ -491,8 +502,9 @@ export class Service {
       // The schema and handler are selected by the same checked operation key.
       const handler = this[op as CommandName] as (
         value: typeof args,
+        requestId?: string,
       ) => CommandResults[CommandName];
-      const result = handler.call(this, args);
+      const result = handler.call(this, args, requestId);
       if (requestId) this.store.saveReceipt(requestId, digest, result);
       return result;
     });
@@ -847,6 +859,26 @@ export class Service {
         .slice(-args.limit);
     }
     if (name === "context") return this.context(queries.context.parse(input));
+    if (name === "verification_profiles") {
+      queries.verification_profiles.parse(input);
+      return this.verification.profiles();
+    }
+    if (name === "verification_execution") {
+      const args = queries.verification_execution.parse(input);
+      return this.verification.execution(args.execution_id);
+    }
+    if (name === "verification_history") {
+      const args = queries.verification_history.parse(input);
+      return this.verification.history(args.task_id, {
+        execution_id: args.execution_id,
+        offset: args.offset,
+        limit: args.limit,
+      });
+    }
+    if (name === "verification_log") {
+      const args = queries.verification_log.parse(input);
+      return this.verification.log(args.execution_id, args.cursor, args.limit);
+    }
     throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
   }
   assertGuidedReady(task: Task) {
@@ -2599,5 +2631,25 @@ export class Service {
       references: { project_id: project.id, task_id: task.id },
       total_chars: total,
     };
+  }
+
+  verification_start(
+    args: CommandArgs<"verification_start">,
+    requestId?: string,
+  ): CommandResults["verification_start"] {
+    return this.verification.start(args, requestId ?? null);
+  }
+  verification_stop(
+    args: CommandArgs<"verification_stop">,
+  ): CommandResults["verification_stop"] {
+    return this.verification.stop(args);
+  }
+  verification_reconcile(
+    args: CommandArgs<"verification_reconcile">,
+  ): CommandResults["verification_reconcile"] {
+    return this.verification.reconcile(args);
+  }
+  reconcileVerificationAfterRestart() {
+    this.verification.reconcileRunningAtStartup();
   }
 }

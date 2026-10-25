@@ -27,6 +27,42 @@ function typedContracts(service: Service) {
   service.query("project", { task_id: task.id });
   // @ts-expect-error project query requires its input object.
   service.query("project");
+  service.query("verification_profiles", {});
+  service.query("verification_execution", { execution_id: "vex_x" });
+  service.query("verification_history", { task_id: task.id });
+  service.query("verification_log", { execution_id: "vex_x" });
+  service.execute("verification_start", {
+    task_id: task.id,
+    run_id: "run_x",
+    claim_epoch: 1,
+    profile_id: "check",
+  });
+  service.execute("verification_stop", {
+    execution_id: "vex_x",
+    run_id: "run_x",
+  });
+  service.execute("verification_reconcile", {
+    execution_id: "vex_x",
+    run_id: "run_x",
+    expected_version: 1,
+    outcome: "confirmed_stopped",
+    observed: "实际核实",
+    confirmed_stop: true,
+  });
+  // @ts-expect-error verification_start requires claim_epoch.
+  service.execute("verification_start", {
+    task_id: task.id,
+    run_id: "run_x",
+    profile_id: "check",
+  });
+  // @ts-expect-error verification_reconcile requires confirmed_stop.
+  service.execute("verification_reconcile", {
+    execution_id: "vex_x",
+    run_id: "run_x",
+    expected_version: 1,
+    outcome: "confirmed_stopped",
+    observed: "x",
+  });
   return task;
 }
 void typedContracts;

@@ -48,6 +48,7 @@ export interface SupervisorIncident extends VersionedRecord {
   replacement_run_id: string | null;
   resolution: string;
   snoozed_until?: string | null;
+  diagnosis?: RuntimeDiagnosis | null;
 }
 export interface SupervisorState extends VersionedRecord {
   project_id: string;
@@ -157,6 +158,7 @@ export interface Run extends VersionedRecord {
   status_note?: string;
   dispatch?: DispatchInfo;
   provider_session_id?: string;
+  diagnosis?: RuntimeDiagnosis | null;
 }
 export type TaskStatus =
   "pending" | "doing" | "blocked" | "review" | "reconcile" | "done";
@@ -170,6 +172,164 @@ export interface WorkspaceEvidence {
   verification_source: "agent_reported";
   algorithm?: "scope-content-v2";
   files?: Record<string, string>;
+}
+
+/** evolution-v1：服务亲自执行的验证记录；来源固定 service_executed，独立于 Agent 自报。 */
+export type VerificationExecutionStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "timed_out"
+  | "stopped"
+  | "start_failed"
+  | "unknown";
+
+export interface VerificationReservation {
+  state: "held" | "released";
+  workdir: string;
+  released_at: string | null;
+  released_by_run_id: string | null;
+  outcome:
+    | "known_exit"
+    | "start_failed"
+    | "confirmed_stopped"
+    | "isolated"
+    | null;
+  observed: string;
+}
+
+export interface VerificationExecution extends VersionedRecord {
+  project_id: string;
+  task_id: string;
+  run_id: string;
+  claim_epoch: number;
+  request_id: string | null;
+  profile_id: string;
+  profile_sha256: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  status: VerificationExecutionStatus;
+  source: "service_executed";
+  requested_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  exit_code: number | null;
+  signal: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  log_path: string;
+  log_sha256: string | null;
+  log_bytes: number;
+  output_truncated: boolean;
+  workspace_before: WorkspaceEvidence;
+  workspace_after: WorkspaceEvidence | null;
+  dependency_revisions: Record<string, string>;
+  reservation: VerificationReservation;
+}
+
+export interface VerificationFreshness {
+  state: "current" | "stale" | "unknown";
+  reasons: (
+    | "not_passed"
+    | "execution_unknown"
+    | "owner_changed"
+    | "scope_changed_during_run"
+    | "scope_changed_after_run"
+    | "workspace_unobservable"
+    | "dependency_changed"
+    | "profile_changed"
+    | "process_unconfirmed"
+  )[];
+  observed_at: string;
+}
+
+export interface VerificationSummary {
+  execution_id: string;
+  profile_id: string;
+  profile_sha256: string;
+  version: number;
+  status: VerificationExecutionStatus;
+  source: "service_executed";
+  passed: boolean;
+  freshness: VerificationFreshness;
+  requested_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  reservation_state: "held" | "released";
+  log_path: string;
+}
+
+export interface VerificationProfilesView {
+  config_path: string;
+  config_version: 1 | null;
+  config_sha256: string | null;
+  valid: boolean;
+  error: { code: string; message: string } | null;
+  items: {
+    id: string;
+    command: string;
+    args: string[];
+    cwd: string;
+    timeout_ms: number;
+    max_output_bytes: number;
+    profile_sha256: string;
+  }[];
+  notice: string;
+}
+
+export interface VerificationHistoryView {
+  items: (VerificationExecution & { freshness: VerificationFreshness })[];
+  total: number;
+  next_offset: number | null;
+}
+
+export interface VerificationLogView {
+  execution_id: string;
+  status: VerificationExecutionStatus;
+  cursor: string | null;
+  next_cursor: string | null;
+  returned_bytes: number;
+  total_bytes: number;
+  text: string;
+  encoding: "utf-8";
+  decode_errors: "replace";
+  replacement_count: number;
+  complete: boolean;
+  capture_truncated: boolean;
+  capture_complete: boolean;
+  log_sha256: string | null;
+  notice: string;
+}
+
+/** evolution-v1：可解释恢复诊断（RB-004 消费；RB-003 按契约提供共享类型）。 */
+export interface RuntimeDiagnosis {
+  category:
+    | "authentication"
+    | "transient"
+    | "permission"
+    | "configuration"
+    | "process_unknown"
+    | "unknown";
+  confidence: "high" | "medium" | "low";
+  summary: string;
+  evidence: string[];
+  observed_at: string;
+  source: "adapter_observed" | "process_observed" | "rule_inferred";
+  next_action: {
+    kind:
+      | "authenticate"
+      | "configure"
+      | "retry"
+      | "wait"
+      | "confirm_stop"
+      | "inspect"
+      | "none";
+    label: string;
+    tool: string | null;
+    arguments: Record<string, unknown> | null;
+  };
 }
 export interface WorkflowState {
   recovered_epoch: number;
@@ -220,6 +380,7 @@ export interface Task extends VersionedRecord, TaskFields {
   evidence?: WorkspaceEvidence;
   artifacts: Artifact[];
   verification: Verification[];
+  service_verification?: VerificationSummary | null;
   waiting?: { until: string; reason: string; run_id: string } | null;
   verification_snapshot_id?: string;
   warnings?: string[];
@@ -294,6 +455,7 @@ export interface RecordMap {
   message: Message;
   decision: Decision;
   proposal: Proposal;
+  verification_execution: VerificationExecution;
 }
 export type RecordKind = keyof RecordMap;
 export interface ScopeConflict {
@@ -503,6 +665,12 @@ export interface QueryResults {
   events: RelayEvent[];
   inbox: Message[];
   context: ContextPacket;
+  verification_profiles: VerificationProfilesView;
+  verification_execution: VerificationExecution & {
+    freshness: VerificationFreshness;
+  };
+  verification_history: VerificationHistoryView;
+  verification_log: VerificationLogView;
 }
 export interface CommandResults {
   plan_create: {
@@ -544,6 +712,11 @@ export interface CommandResults {
   message_ack: Message;
   message_resolve: Message;
   decision_record: Decision;
+  verification_start: VerificationExecution;
+  verification_stop: VerificationExecution;
+  verification_reconcile: VerificationExecution & {
+    freshness: VerificationFreshness;
+  };
 }
 
 export type CommandResult<K extends keyof CommandResults> = CommandResults[K];

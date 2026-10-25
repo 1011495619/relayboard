@@ -52,6 +52,14 @@ const queryDescriptions: Record<string, string> = {
   context:
     "Build a bounded handoff packet with current objective, constraints, claim epoch, checkpoint, artifacts and next step. Check truncated before acting.",
   events: "Read a bounded project activity page after a sequence cursor.",
+  verification_profiles:
+    "Discover configured service-executed verification profiles: actual config path, version, validity, error, available IDs and per-profile summaries. Callers start checks by profile ID only; no command or environment parameters are accepted.",
+  verification_execution:
+    "Read one complete service-executed verification execution plus its freshness. Full args/cwd, before/after fingerprints, dependency revisions and reservation audit live here; the task summary is derived from this record.",
+  verification_history:
+    "Read paginated service-executed verification history for a task. Pass execution_id to read one exact record; otherwise newest first. History never rewrites older unknown/held records.",
+  verification_log:
+    "Read bounded log bytes for one service-executed verification by execution ID and opaque cursor. Only complete UTF-8 code points are returned; running executions are incomplete until terminal EOF.",
 };
 
 export interface McpHandlers {
@@ -87,6 +95,12 @@ export const guidedTools = new Set([
   "memory_search",
   "memory_get",
   "supervisor_status",
+  "verification_profiles",
+  "verification_start",
+  "verification_stop",
+  "verification_execution",
+  "verification_history",
+  "verification_log",
 ]);
 export function createMcp(
   { command, query }: McpHandlers,

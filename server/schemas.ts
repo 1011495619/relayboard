@@ -514,6 +514,39 @@ export const commands = {
       })
       .strict(),
   },
+  verification_start: {
+    description:
+      "Start a service-executed verification run by referencing a configured profile ID. The service reads and validates <data_dir>/verification-profiles.json, spawns the configured command/args without a shell and records full terminal state, logs, content fingerprints and provenance. Only the current task owner with a matching epoch may start; one execution per task at a time.",
+    schema: z
+      .object({
+        task_id: id,
+        run_id: id,
+        claim_epoch: version,
+        profile_id: id,
+      })
+      .strict(),
+  },
+  verification_stop: {
+    description:
+      "Request to stop a running service-executed verification. Signals the process group and observes descendants before writing stopped; uncertain outcomes stay unknown and the workdir reservation stays held.",
+    schema: z
+      .object({ execution_id: id, run_id: id })
+      .strict(),
+  },
+  verification_reconcile: {
+    description:
+      "Resolve an unknown service-executed verification. confirmed_stopped requires actual descendant stop evidence and confirmed_stop=true; isolated requires a different real worktree with no scope conflict and keeps the old workdir held. Both append audit events and never rewrite historical verification results.",
+    schema: z
+      .object({
+        execution_id: id,
+        run_id: id,
+        expected_version: version,
+        outcome: z.enum(["confirmed_stopped", "isolated"]),
+        observed: text.min(1),
+        confirmed_stop: z.boolean(),
+      })
+      .strict(),
+  },
 };
 
 export const queries = {
@@ -665,6 +698,23 @@ export const queries = {
       project_id: id,
       after: z.number().int().min(0).default(0),
       limit: z.number().int().min(1).max(200).default(60),
+    })
+    .strict(),
+  verification_profiles: z.object({}).strict(),
+  verification_execution: z.object({ execution_id: id }).strict(),
+  verification_history: z
+    .object({
+      task_id: id,
+      execution_id: id.optional(),
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(50).default(10),
+    })
+    .strict(),
+  verification_log: z
+    .object({
+      execution_id: id,
+      cursor: z.string().max(500).optional(),
+      limit: z.number().int().min(1).max(65536).default(16384),
     })
     .strict(),
 };

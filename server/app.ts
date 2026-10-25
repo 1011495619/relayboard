@@ -44,8 +44,11 @@ export function createApp({
 }: AppOptions = {}) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const store = new Store(join(dataDir, "relayboard.sqlite")),
-    service = new Service(store);
-  store.transaction(() => service.reconcileSystemNotices());
+    service = new Service(store, { dataDir });
+  store.transaction(() => {
+    service.reconcileSystemNotices();
+    service.reconcileVerificationAfterRestart();
+  });
   const runner = new Runner(service, {
     dataDir,
     baseUrl: `http://127.0.0.1:${port}`,
