@@ -66,7 +66,7 @@ const statuses = {
   open: "待处理",
   recovering: "正在接手",
   escalated: "需要检查",
-  resolved: "已恢复",
+  resolved: "告警已解除",
 };
 const text = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
