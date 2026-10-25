@@ -79,6 +79,41 @@ const claimFields = {
 };
 
 export const commands = {
+  plan_create: {
+    description:
+      "Atomically create a bounded task plan with local dependency keys and scope preflight. No processes launch. Reuses existing planning permissions. Overlaps warn by default; exclusive=true rejects them.",
+    schema: z
+      .object({
+        project_id: id,
+        actor_run_id: id.optional(),
+        exclusive: z.boolean().default(false),
+        tasks: z
+          .array(
+            z
+              .object({ ...taskFields, key: id, needs: ids.default([]) })
+              .strict(),
+          )
+          .min(1)
+          .max(16),
+      })
+      .strict(),
+  },
+  work_takeover: {
+    description:
+      "Take over as YOUR registered Run, never impersonate a departed owner. First read work_recovery. Rechecks version and every handoff guard; known-stopped owners need no repeated confirmation. Returns a fresh recovery guide, not inherited test approval.",
+    schema: z
+      .object({
+        task_id: id,
+        run_id: id,
+        expected_version: version,
+        reason: text.min(1),
+        confirmed_stop: z.boolean().default(false),
+        descendants: z
+          .enum(["continue", "require_stopped"])
+          .default("continue"),
+      })
+      .strict(),
+  },
   supervisor_handle: {
     description:
       "Recheck a patrol incident after fixing its cause, or snooze it until a specified time. Requires its current version. Rechecking preserves all execution budgets; it does not declare an old writer stopped.",
@@ -157,6 +192,7 @@ export const commands = {
         handle: workHandle,
         kind: z.enum([
           "recover",
+          "wait",
           "progress",
           "step",
           "blocked",
@@ -165,6 +201,7 @@ export const commands = {
         ]),
         summary: text.min(1),
         observed: text.min(1).optional(),
+        wait_until: z.iso.datetime().optional(),
         step_id: id.optional(),
         next_step: text.optional(),
         artifacts: z.array(artifact).max(40).optional(),
@@ -335,6 +372,7 @@ export const commands = {
         task_id: id,
         expected_version: version,
         reviewer_run_id: id.optional(),
+        human_review: z.boolean().default(false),
         accepted: z.boolean(),
         note: text.min(1),
       })
@@ -479,6 +517,62 @@ export const commands = {
 };
 
 export const queries = {
+  api: z
+    .object({
+      name: short.optional(),
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(30).default(20),
+    })
+    .strict(),
+  board: z
+    .object({
+      project_id: id.optional(),
+      status: z
+        .array(
+          z.enum([
+            "pending",
+            "doing",
+            "blocked",
+            "review",
+            "reconcile",
+            "done",
+          ]),
+        )
+        .max(6)
+        .optional(),
+      owner_run_id: id.optional(),
+      parent_id: id.nullable().optional(),
+      pending_review: z.boolean().default(false),
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(50).default(20),
+    })
+    .strict(),
+  scope_preflight: z
+    .object({
+      project_id: id,
+      tasks: z
+        .array(
+          z
+            .object({
+              key: id,
+              scopes: paths,
+              read_only: z.boolean().default(false),
+            })
+            .strict(),
+        )
+        .min(1)
+        .max(16),
+    })
+    .strict(),
+  work_recovery: z.object({ task_id: id, run_id: id }).strict(),
+  evidence_history: z
+    .object({
+      task_id: id,
+      snapshot_id: id.optional(),
+      offset: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(20).default(10),
+    })
+    .strict(),
   supervisor_status: z
     .object({
       project_id: id.optional(),

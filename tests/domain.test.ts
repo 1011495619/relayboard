@@ -245,6 +245,7 @@ test("dependencies are only released by accepted evidence, with self-review bloc
         expected_version: submitted.version,
         reviewer_run_id: a.id,
         accepted: true,
+        human_review: true,
         note: "自己确认",
       }),
     code("SELF_REVIEW"),
@@ -253,6 +254,7 @@ test("dependencies are only released by accepted evidence, with self-review bloc
     task_id: first.id,
     expected_version: submitted.version,
     accepted: true,
+    human_review: true,
     note: "人工核对验证成果",
   });
   assert.equal(f.s.eligibility(next, a).eligible, true);
@@ -623,6 +625,7 @@ test("children must be accepted before fresh parent integration evidence can sub
       task_id: c.id,
       expected_version: submitted.version,
       accepted: true,
+      human_review: true,
       note: "independently checked",
     });
   }
@@ -739,6 +742,7 @@ test("historical acknowledged requests can be explicitly resolved after task acc
     task_id: task.id,
     expected_version: submitted.version,
     accepted: true,
+    human_review: true,
     note: "独立核验成果",
   });
   f.s.execute("run_end", {

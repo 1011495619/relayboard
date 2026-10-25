@@ -21,6 +21,7 @@ const help = `Relayboard ${version}
   relayboard worktree <project-id> <JSON>
   relayboard export <task-id>
   relayboard operations
+  relayboard doctor                  检查服务、认证与MCP连接，不调用模型
   relayboard health
   relayboard --version
 Environment: PORT, RELAYBOARD_DATA_DIR, RELAYBOARD_URL, RELAYBOARD_TOKEN.
@@ -121,7 +122,37 @@ async function main() {
     result = await request("/api/worktree", { project_id: name, ...args });
   else if (mode === "export")
     result = await request("/api/export", { task_id: name });
-  else if (mode === "health")
+  else if (mode === "doctor") {
+    const checks = [];
+    for (const [name, check] of [
+      ["service", () => request("/api/health", null, "GET")],
+      [
+        "mcp",
+        async () => {
+          const t = await listTools("work_start");
+          return {
+            tool: Array.isArray(t) ? "relay_work_start" : t.name,
+            available: true,
+          };
+        },
+      ],
+    ] as const) {
+      try {
+        const value = await check();
+        checks.push({ name, ok: true, value });
+      } catch (error) {
+        checks.push({
+          name,
+          ok: false,
+          ...errorInfo(error),
+          next_step:
+            "核对RELAYBOARD_URL、服务进程和RELAYBOARD_TOKEN；客户端断线时重新连接，或使用stdio mcp入口。",
+        });
+      }
+    }
+    result = { ok: checks.every((c) => c.ok), checks, model_requests: 0 };
+    if (!checks.every((c) => c.ok)) process.exitCode = 1;
+  } else if (mode === "health")
     result = await request("/api/health", null, "GET");
   else {
     throw Error(`未知命令：${mode}。使用 --help 查看用法。`);
@@ -139,6 +170,8 @@ main().catch((error) => {
       code: errorInfo(error).code || "ERROR",
       message: errorInfo(error).message,
       details: errorInfo(error).details,
+      next_action: errorInfo(error).next_action,
+      retryable: errorInfo(error).retryable,
     }),
   );
   process.exitCode = 1;

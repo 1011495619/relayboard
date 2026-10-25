@@ -42,3 +42,11 @@ On older services without work tools, use `relay_eligible` → `relay_task_claim
 Use `relay_memory_search` for relevant project lessons, then `relay_memory_get` by ID/version for evidence. Summaries omit full bodies; avoid loading the whole library or old conversation. Save reusable verified facts, runbooks and failed approaches with `relay_memory_save`, source and evidence; exclude credentials. Current project constraints and decisions take precedence over memory. `relay_memory_sources` lists explicit remote libraries; only send a focused query via `relay_memory_remote_search` when appropriate.
 
 When a patrol reminder arrives, read `work_next` and report actual progress or a specific blocker. Heartbeat and log output do not resolve a stall. Replacement Runs still recover files and report every native descendant separately. `relay_supervisor_status` explains reminders, recovery attempts and budgets; failed client login or tool approval needs configuration, not repeated blind relaunches.
+
+## Low-friction recovery (0.7+)
+
+Start with `board` for compact status; use `api {name}` for an exact schema rather than reading source or guessing tool names. After an old owner stops, register YOUR new Run, read `work_recovery`, then use its versioned `work_takeover` action and report actual recover. Never report as the old Run.
+
+Both guided verify and nonempty legacy checkpoint verification replace the COMPLETE current check snapshot; explain replacements in summary, retain all still-relevant failing checks, and use evidence_history for immutable old snapshots. Do not copy a removed failing command as a fake passing run. A changed HEAD alone does not expire new content-based evidence; scoped bytes and dependency contracts still matter.
+
+For long running work, report `kind: "wait"` with a concrete reason and future `wait_until` within24hours. It defers patrol, not progress or proof of process termination. At the deadline recheck actual results and report; do not renew indefinitely in place of doing work.

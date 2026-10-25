@@ -154,10 +154,15 @@ import { AgentIcon } from "./components/agent-icon";
 import { AgentCatalog } from "./components/agent-catalog";
 import { ProjectMemoryView } from "./components/project-memory.tsx";
 import { SupervisorView } from "./components/supervisor-view.tsx";
+import {
+  EvidenceHistory,
+  RecoveryPanel,
+} from "./components/task-reliability.tsx";
 import "./style.css";
 class ApiError extends Error {
   code?: string;
   details?: unknown;
+  next_action?: { tool?: string; instruction?: string };
 }
 const errorInfo = (error: unknown): ApiError =>
   error instanceof Error ? error : new Error(String(error));
@@ -299,6 +304,7 @@ async function api<P extends string>(
     const e = new ApiError(value.error?.message || `HTTP ${res.status}`);
     e.code = value.error?.code;
     e.details = value.error?.details;
+    e.next_action = value.error?.next_action;
     throw e;
   }
   return value.result ?? value;
@@ -552,6 +558,9 @@ function App() {
                   .map((d) => d.message || d.short_id || "")
                   .filter(Boolean)
                   .join("；")}`
+              : "") +
+            (error.next_action?.instruction
+              ? `；${error.next_action.instruction}`
               : ""),
           true,
         );
@@ -2530,6 +2539,11 @@ function TaskDrawer({
   context: (task: Task) => Promise<void>;
   launch: (run: Run, task: Task) => Promise<void>;
 }) {
+  const loadEvidence = useCallback(
+    (offset: number, snapshot_id?: string) =>
+      query("evidence_history", { task_id: t.id, offset, snapshot_id }),
+    [t.id],
+  );
   const owner = data.runs.find((r) => r.id === t.owner_run_id),
     children = data.tasks.filter((c) => c.parent_id === t.id),
     parent = data.tasks.find((p) => p.id === t.parent_id),
@@ -2909,8 +2923,34 @@ function TaskDrawer({
               </p>
             )}
           </section>
+          {currentRun &&
+            owner &&
+            !mine &&
+            ["doing", "blocked", "reconcile", "review"].includes(t.status) && (
+              <RecoveryPanel
+                taskId={t.id}
+                runId={currentRun.id}
+                inspect={() =>
+                  query("work_recovery", {
+                    task_id: t.id,
+                    run_id: currentRun.id,
+                  })
+                }
+                takeover={(args) =>
+                  mutate("work_takeover", args, "已接管，请核验现场后继续")
+                }
+              />
+            )}
+          <EvidenceHistory
+            taskId={t.id}
+            version={t.version}
+            load={loadEvidence}
+          />
           <section className="detail-section">
-            <h3>成果与验证</h3>
+            <h3>成果与当前验证集合</h3>
+            <p className="muted">
+              新的完整验证集合会替代当前集合，旧失败仍保留。测试结果由执行者报告。
+            </p>
             {t.artifacts.map((a) => (
               <div className="artifact-item" key={a.path}>
                 <FileText size={15} />
@@ -3314,6 +3354,7 @@ function Modal({
             task_id: task.id,
             expected_version: task.version,
             reviewer_run_id: currentRun?.id,
+            human_review: !currentRun,
             accepted: modal.accepted ?? false,
             note: value("note"),
           },

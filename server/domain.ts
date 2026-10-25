@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { randomUUID, createHash } from "node:crypto";
 import { resolve, posix, isAbsolute, dirname, basename } from "node:path";
 import { realpathSync } from "node:fs";
@@ -14,6 +15,7 @@ import {
   planSignature,
   artifactRevision,
   evidenceStale,
+  evidenceDifference,
   pendingRequests,
 } from "./workflow.ts";
 import { observeWorkspace } from "./workspace.ts";
@@ -42,6 +44,7 @@ import type {
 } from "./schemas.ts";
 import type { Store } from "./store.ts";
 import type {
+  WorkGuide,
   RecordKind,
   RecordMap,
   VersionedRecord,
@@ -419,6 +422,22 @@ export class Service {
       if (r.process?.status === "running") activeRuns.add(r.id);
     if (!activeRuns.has(run.id) && activeRuns.size >= project.max_concurrency)
       reasons.push("项目并发预算已满");
+    if (
+      this.tasks(task.project_id).some(
+        (t) =>
+          t.id !== task.id &&
+          ACTIVE.has(t.status) &&
+          t.owner_run_id &&
+          t.owner_run_id !== run.id &&
+          !!run.workdir &&
+          canonical(
+            this.run(t.owner_run_id).workdir || "/__unknown_workspace__",
+          ) === canonical(run.workdir),
+      )
+    )
+      warnings.push(
+        "同一实际worktree存在其他活动执行者；即使范围不重叠，构建仍可能受他人WIP影响，建议独立worktree。",
+      );
     if (task.mode === "coordinator")
       warnings.push("此任务负责协调；具体修改请建立或领取子任务");
     if (!run.workdir && !task.read_only)
@@ -490,6 +509,168 @@ export class Service {
   query(name: string, input: unknown = {}): QueryResults[QueryName] {
     const schema = queries[name as QueryName];
     if (!schema) throw new AppError("UNKNOWN_QUERY", `未知查询 ${name}`, 400);
+    if (name === "api") {
+      const args = queries.api.parse(input);
+      const all = [
+        ...Object.entries(commands).map(([name, spec]) => ({
+          name,
+          kind: "command" as const,
+          description: spec.description,
+          fields: Object.keys(spec.schema.shape),
+          schema: spec.schema,
+        })),
+        ...Object.entries(queries).map(([name, schema]) => ({
+          name,
+          kind: "query" as const,
+          description:
+            schema.description ||
+            `Read ${name}; use its schema and follow pagination.`,
+          fields: Object.keys(schema.shape),
+          schema,
+        })),
+      ].filter(
+        (t) => !args.name || t.name === args.name.replace(/^relay_/, ""),
+      );
+      return {
+        items: all
+          .slice(args.offset, args.offset + args.limit)
+          .map(({ schema, ...t }) => ({
+            ...t,
+            ...(args.name ? { schema: z.toJSONSchema(schema) } : {}),
+          })),
+        total: all.length,
+        next_offset:
+          args.offset + args.limit < all.length
+            ? args.offset + args.limit
+            : null,
+      };
+    }
+    if (name === "scope_preflight")
+      return this.scopePreflight(queries.scope_preflight.parse(input));
+    if (name === "board") {
+      const args = queries.board.parse(input);
+      if (args.project_id) this.get("project", args.project_id);
+      const all = this.store
+        .list("task", args.project_id)
+        .filter(
+          (t) =>
+            (!args.status || args.status.includes(t.status)) &&
+            (!args.owner_run_id || t.owner_run_id === args.owner_run_id) &&
+            (args.parent_id === undefined || t.parent_id === args.parent_id) &&
+            (!args.pending_review || t.status === "review"),
+        );
+      return {
+        items: all.slice(args.offset, args.offset + args.limit).map((t) => ({
+          id: t.id,
+          short_id: t.short_id,
+          project_id: t.project_id,
+          title: t.title,
+          status: t.status,
+          version: t.version,
+          owner_run_id: t.owner_run_id,
+          parent_id: t.parent_id,
+          age_seconds: Math.max(
+            0,
+            Math.floor(
+              (Date.now() -
+                Date.parse(t.checkpoint?.at || t.claimed_at || t.created_at)) /
+                1000,
+            ),
+          ),
+          blocker: (t.checkpoint?.blocker || "").slice(0, 300),
+          next_action: (t.status === "review"
+            ? "独立验收"
+            : t.status === "done"
+              ? "已完成"
+              : t.checkpoint?.next_step || "work_start"
+          ).slice(0, 300),
+          verification_failures: t.verification.filter((v) => !v.passed).length,
+          open_requests: pendingRequests(this, t).length,
+        })),
+        total: all.length,
+        next_offset:
+          args.offset + args.limit < all.length
+            ? args.offset + args.limit
+            : null,
+      };
+    }
+    if (name === "work_recovery") {
+      const args = queries.work_recovery.parse(input),
+        task = this.task(args.task_id);
+      const target = this.sameProject(task.project_id, "run", args.run_id);
+      const old = task.owner_run_id ? this.run(task.owner_run_id) : null;
+      const known =
+        !!old &&
+        (old.process
+          ? ["exited", "failed", "stopped"].includes(old.process.status)
+          : old.status === "ended");
+      return {
+        task_id: task.id,
+        owner_run_id: task.owner_run_id,
+        expected_version: task.version,
+        known_stopped: known,
+        active_descendants: this.activeDescendants(task).map((t) => t.id),
+        required_capabilities: task.required_capabilities,
+        target_capabilities: target.capabilities,
+        target_scopes: target.delegated_scopes,
+        next_action: {
+          tool:
+            task.owner_run_id && task.owner_run_id !== target.id
+              ? "relay_work_takeover"
+              : "relay_work_start",
+          arguments:
+            task.owner_run_id && task.owner_run_id !== target.id
+              ? {
+                  task_id: task.id,
+                  run_id: target.id,
+                  expected_version: task.version,
+                }
+              : { task_id: task.id, run_id: target.id },
+          required_fields:
+            task.owner_run_id && task.owner_run_id !== target.id
+              ? [
+                  "reason",
+                  ...(!known ? ["confirmed_stop（同目录须实际确认）"] : []),
+                ]
+              : [],
+        },
+        note: "预览不转移归属。接管时重新检查所有守卫；新执行者须核验现场和当前证据，旧心跳过期不代表停止。",
+      };
+    }
+    if (name === "evidence_history") {
+      const args = queries.evidence_history.parse(input),
+        task = this.task(args.task_id);
+      const all = this.store
+        .list("evidence_snapshot", task.project_id)
+        .filter((s) => s.task_id === task.id)
+        .reverse();
+      const items = all
+        .slice(args.offset, args.offset + args.limit)
+        .map(({ verification, evidence: _e, ...s }) => ({
+          ...s,
+          reason: s.reason.slice(0, 600),
+          checks: verification.length,
+          failures: verification.filter((v) => !v.passed).length,
+          current: s.id === task.verification_snapshot_id,
+        }));
+      const snapshot = args.snapshot_id
+        ? this.get("evidence_snapshot", args.snapshot_id)
+        : undefined;
+      ensure(
+        !snapshot || snapshot.task_id === task.id,
+        "PROJECT_MISMATCH",
+        "证据快照须属于当前任务",
+      );
+      return {
+        items,
+        total: all.length,
+        next_offset:
+          args.offset + items.length < all.length
+            ? args.offset + items.length
+            : null,
+        ...(snapshot ? { snapshot } : {}),
+      };
+    }
     if (name === "supervisor_status")
       return supervisorStatus(this, queries.supervisor_status.parse(input));
     if (name === "memory_search")
@@ -775,6 +956,35 @@ export class Service {
       "ALREADY_SUBMITTED",
       "成果已提交，请等待独立验收",
     );
+    if (args.kind === "wait") {
+      ensure(
+        !needsRecovery(this, task),
+        "RECOVERY_REQUIRED",
+        "先核验现场，再声明等待",
+      );
+      const until = Date.parse(args.wait_until || "");
+      ensure(
+        Number.isFinite(until) &&
+          until > Date.now() &&
+          until <= Date.now() + 86400000,
+        "WAIT_WINDOW",
+        "wait_until须为未来24小时以内；到期后重新检查，不以等待替代进展",
+      );
+      task = this.update("task", task, {
+        waiting: {
+          until: args.wait_until!,
+          reason: args.summary,
+          run_id: run.id,
+        },
+      });
+      this.emit(task.project_id, "work.waiting", {
+        task_id: task.id,
+        run_id: run.id,
+        until: args.wait_until,
+        summary: args.summary,
+      });
+      return workGuide(this, run.id, task);
+    }
     const old = task.workflow || emptyWorkflow(task);
     let workflow = { ...old };
     if (args.kind === "recover") {
@@ -831,6 +1041,7 @@ export class Service {
           observed: args.observed,
           next_step: args.next_step || "按执行指引继续",
         });
+      this.closeSystemNotices(task, "handoff", run.id);
       workflow = {
         ...old,
         recovered_epoch: task.claim_epoch,
@@ -954,6 +1165,7 @@ export class Service {
     );
     task = this.update("task", task, {
       workflow,
+      waiting: null,
       ...(args.kind === "verify"
         ? { verification: args.verification || [] }
         : {}),
@@ -1263,6 +1475,12 @@ export class Service {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     const run = this.sameProject(task.project_id, "run", args.run_id);
+    if (
+      task.owner_run_id === run.id &&
+      ACTIVE.has(task.status) &&
+      run.status === "active"
+    )
+      return task;
     const eligibility = this.eligibility(task, run);
     ensure(
       eligibility.eligible,
@@ -1281,7 +1499,236 @@ export class Service {
       run_id: run.id,
       summary: `${run.name} 领取 ${task.short_id}`,
     });
+    return {
+      ...result,
+      warnings: [
+        ...eligibility.warnings,
+        "底层领取不会自动记录现场恢复；优先work_start → work_next → work_report。",
+      ],
+    };
+  }
+  scopePreflight(
+    args: QueryArgs<"scope_preflight">,
+  ): QueryResults["scope_preflight"] {
+    this.get("project", args.project_id);
+    ensure(
+      new Set(args.tasks.map((t) => t.key)).size === args.tasks.length,
+      "PLAN_KEYS",
+      "计划 key 须唯一",
+    );
+    const tasks = args.tasks.map((t) => ({
+      ...t,
+      scopes: t.scopes.map(scopePath),
+    }));
+    const result: QueryResults["scope_preflight"] = {
+      overlaps: [],
+      warnings: [],
+    };
+    for (let i = 0; i < tasks.length; i++)
+      for (let j = i + 1; j < tasks.length; j++) {
+        const a = tasks[i],
+          b = tasks[j];
+        if (a.read_only || b.read_only) continue;
+        const scopes = a.scopes.filter((s) =>
+          b.scopes.some((p) => overlaps(s, p)),
+        );
+        if (scopes.length)
+          result.overlaps.push({ left: a.key, right: b.key, scopes });
+      }
+    if (result.overlaps.length)
+      result.warnings.push(
+        "候选任务范围重叠；串行执行或使用独立真实worktree。预检不预留执行权，领取时仍检查实际目录、资源和并发。",
+      );
+    if (this.tasks(args.project_id).some((t) => ACTIVE.has(t.status)))
+      result.warnings.push(
+        "项目已有活动任务；本预检只比较候选逻辑范围，领取时重新检查已有占用。",
+      );
     return result;
+  }
+  plan_create(args: CommandArgs<"plan_create">): CommandResults["plan_create"] {
+    const preflight = this.scopePreflight({
+      project_id: args.project_id,
+      tasks: args.tasks,
+    });
+    ensure(
+      !args.exclusive || !preflight.overlaps.length,
+      "PLAN_SCOPE_CONFLICT",
+      "独占计划有范围重叠",
+      preflight,
+    );
+    const keys: Record<string, string> = Object.create(null);
+    const tasks = args.tasks.map(({ key, needs: _needs, ...fields }) => {
+      const task = this.task_create({
+        project_id: args.project_id,
+        actor_run_id: args.actor_run_id,
+        ...fields,
+      });
+      keys[key] = task.id;
+      return task;
+    });
+    for (let i = 0; i < tasks.length; i++) {
+      const needs = args.tasks[i].needs.map((key) => {
+        ensure(keys[key], "PLAN_DEPENDENCY", "计划依赖key不存在", { key });
+        return keys[key];
+      });
+      const candidate = {
+        ...tasks[i],
+        depends_on: [...new Set([...tasks[i].depends_on, ...needs])],
+      };
+      this.validateTask(candidate);
+      tasks[i] = this.update("task", tasks[i], candidate);
+    }
+    return { tasks, keys, preflight };
+  }
+  work_takeover(args: CommandArgs<"work_takeover">): WorkGuide {
+    const task = this.task(args.task_id);
+    this.revision(task, args.expected_version);
+    const target = this.sameProject(task.project_id, "run", args.run_id);
+    ensure(
+      target.status === "active",
+      "RUN_INACTIVE",
+      "请先登记有效的新执行会话",
+    );
+    if (task.owner_run_id === target.id)
+      return workGuide(this, target.id, task);
+    ensure(
+      task.owner_run_id,
+      "HANDOFF_STATE",
+      "未领取任务请直接使用 work_start",
+    );
+    const old = this.run(task.owner_run_id);
+    const known = old.process
+      ? ["exited", "failed", "stopped"].includes(old.process.status)
+      : old.status === "ended";
+    const handed = this.task_handoff({
+      task_id: task.id,
+      expected_version: task.version,
+      to_run_id: target.id,
+      summary: args.reason,
+      descendants: args.descendants,
+      confirmed_stop: args.confirmed_stop || known,
+    });
+    this.emit(task.project_id, "work.taken_over", {
+      task_id: task.id,
+      run_id: target.id,
+      previous_run_id: old.id,
+      known_stopped: known,
+      confirmed_stop: args.confirmed_stop,
+      summary: args.reason,
+    });
+    return workGuide(this, target.id, handed);
+  }
+  closeSystemNotices(
+    task: Task,
+    purpose: "handoff" | "delivery",
+    runId?: string,
+    cutoff = now(),
+  ) {
+    for (const message of this.store.list("message", task.project_id)) {
+      if (
+        !message.system ||
+        message.task_id !== task.id ||
+        (message.purpose !== purpose &&
+          !(
+            message.purpose === undefined &&
+            (purpose === "handoff"
+              ? message.body.startsWith("收到交接：")
+              : message.body.includes("已交付，请核验成果并验收。"))
+          )) ||
+        message.resolved_at ||
+        message.created_at > cutoff ||
+        (runId && message.to_run_id !== runId)
+      )
+        continue;
+      this.update("message", message, {
+        acknowledged_at: message.acknowledged_at || now(),
+        resolved_at: now(),
+        resolved_by: runId || "system",
+        resolution:
+          purpose === "handoff" ? "接收者已完成现场核验" : "任务已完成验收处理",
+      });
+      this.emit(task.project_id, "message.auto_resolved", {
+        task_id: task.id,
+        message_id: message.id,
+        purpose,
+      });
+    }
+  }
+  reconcileSystemNotices() {
+    for (const task of this.store.list("task")) {
+      if (task.status === "done" || task.review)
+        this.closeSystemNotices(
+          task,
+          "delivery",
+          undefined,
+          task.review?.at || task.completed_at || now(),
+        );
+      if (
+        task.owner_run_id &&
+        (task.reconciliation?.run_id === task.owner_run_id ||
+          task.workflow?.recovered_epoch === task.claim_epoch)
+      )
+        this.closeSystemNotices(
+          task,
+          "handoff",
+          task.owner_run_id,
+          [
+            task.workflow?.recovered_epoch === task.claim_epoch
+              ? task.workflow.recovered_at
+              : "",
+            task.reconciliation?.run_id === task.owner_run_id
+              ? task.reconciliation.at
+              : "",
+          ]
+            .filter(Boolean)
+            .sort()
+            .at(-1) || task.created_at,
+        );
+    }
+  }
+  saveEvidence(task: Task, run: Run, args: CommandArgs<"task_checkpoint">) {
+    let previous = task.verification_snapshot_id || null;
+    if (!previous && task.verification.length) {
+      previous = uid("evd");
+      this.store.put("evidence_snapshot", {
+        id: previous,
+        version: 1,
+        project_id: task.project_id,
+        task_id: task.id,
+        actor_run_id: task.checkpoint?.run_id || run.id,
+        created_at: task.checkpoint?.at || now(),
+        reason: "升级前保留的当前验证集合",
+        verification: task.verification,
+        evidence: task.evidence,
+        previous_id: null,
+        legacy: true,
+      });
+    }
+    const evidence = observeWorkspace(run.workdir, task.scopes);
+    const snapshot = this.store.put("evidence_snapshot", {
+      id: uid("evd"),
+      version: 1,
+      project_id: task.project_id,
+      task_id: task.id,
+      actor_run_id: run.id,
+      created_at: now(),
+      reason: args.summary,
+      verification: args.verification,
+      evidence,
+      previous_id: previous,
+    });
+    this.emit(task.project_id, "evidence.replaced", {
+      task_id: task.id,
+      run_id: run.id,
+      snapshot_id: snapshot.id,
+      previous_id: previous,
+      summary: args.summary,
+    });
+    return {
+      evidence,
+      verification_snapshot_id: snapshot.id,
+      verification: args.verification,
+    };
   }
   task_checkpoint(
     args: CommandArgs<"task_checkpoint">,
@@ -1312,11 +1759,9 @@ export class Service {
     };
     const result = this.update("task", task, {
       checkpoint,
+      waiting: null,
       artifacts: merge(task.artifacts, args.artifacts, "path"),
-      verification: merge(task.verification, args.verification, "command"),
-      ...(args.verification.length
-        ? { evidence: observeWorkspace(run.workdir, task.scopes) }
-        : {}),
+      ...(args.verification.length ? this.saveEvidence(task, run, args) : {}),
       status:
         task.status === "reconcile" && allowReconcile
           ? "reconcile"
@@ -1371,12 +1816,22 @@ export class Service {
         task.verification.length &&
         task.verification.every((v) => v.passed),
       "EVIDENCE_REQUIRED",
-      "交付需要成果位置和通过的验证记录",
+      "交付需要成果位置和通过的当前验证记录",
+      {
+        missing_artifacts: !task.artifacts.length,
+        verification_current: !!task.checkpoint.verification_current,
+        failing_checks: task.verification
+          .filter((v) => !v.passed)
+          .map((v) => ({ command: v.command, result: v.result.slice(0, 500) })),
+        next_tool: "relay_work_next",
+        task_id: task.id,
+      },
     );
     ensure(
       !evidenceStale(this, task),
       "EVIDENCE_STALE",
-      "验证后代码已变化或现场未能完整观察，请重新验证并记录结果",
+      "验证后范围内容已变化或现场未能完整观察，请重新验证并记录结果",
+      evidenceDifference(this, task),
     );
     const children = this.tasks(task.project_id).filter(
       (t) => t.parent_id === task.id,
@@ -1413,6 +1868,7 @@ export class Service {
         parent.owner_run_id,
         task.id,
         `${task.short_id} 已交付，请核验成果并验收。`,
+        "delivery",
       );
     return result;
   }
@@ -1420,8 +1876,22 @@ export class Service {
     const task = this.task(args.task_id);
     this.revision(task, args.expected_version);
     ensure(task.status === "review", "NOT_SUBMITTED", "任务尚未提交验收");
+    ensure(
+      !!args.reviewer_run_id || args.human_review,
+      "REVIEW_IDENTITY_REQUIRED",
+      "请提供独立 reviewer_run_id，或由人工管理入口显式设置 human_review=true",
+    );
     if (args.reviewer_run_id) {
-      this.sameProject(task.project_id, "run", args.reviewer_run_id);
+      const reviewer = this.sameProject(
+        task.project_id,
+        "run",
+        args.reviewer_run_id,
+      );
+      ensure(
+        reviewer.status === "active",
+        "RUN_INACTIVE",
+        "验收会话已结束，请登记新的验收会话",
+      );
       ensure(
         args.reviewer_run_id !== task.owner_run_id,
         "SELF_REVIEW",
@@ -1433,7 +1903,8 @@ export class Service {
       ensure(
         !evidenceStale(this, task),
         "EVIDENCE_STALE",
-        "评审时文件版本已变化，请退回后重新验证",
+        "评审时范围内容已变化，请退回后重新验证",
+        evidenceDifference(this, task),
       );
       const process = this.run(task.owner_run_id).process;
       ensure(
@@ -1464,6 +1935,7 @@ export class Service {
       args.accepted ? "task.accepted" : "task.returned",
       { task_id: task.id, run_id: args.reviewer_run_id, summary: args.note },
     );
+    this.closeSystemNotices(task, "delivery");
     if (args.accepted) {
       const targets = new Set<string>(
         this.tasks(task.project_id)
@@ -1797,6 +2269,7 @@ export class Service {
     };
     const result = this.update("task", task, {
       status: "reconcile",
+      waiting: null,
       owner_run_id: target.id,
       claim_epoch: task.claim_epoch + 1,
       handoff,
@@ -1839,6 +2312,7 @@ export class Service {
       target.id,
       task.id,
       `收到交接：${args.summary}。请读取接手包并核验现场。`,
+      "handoff",
     );
     this.emit(task.project_id, "task.handoff", {
       task_id: task.id,
@@ -1880,6 +2354,7 @@ export class Service {
         run_id: args.run_id,
       },
     });
+    this.closeSystemNotices(task, "handoff", args.run_id);
     this.emit(task.project_id, "task.reconciled", {
       task_id: task.id,
       run_id: args.run_id,
@@ -1920,6 +2395,7 @@ export class Service {
     to: string,
     task: string | undefined,
     body: string,
+    purpose?: "handoff" | "delivery" | "dependency" | "supervisor",
   ) {
     return this.message_send({
       project_id: project,
@@ -1928,10 +2404,14 @@ export class Service {
       kind: "request",
       body,
       system: true,
+      ...(purpose ? { purpose } : {}),
     });
   }
   message_send(
-    args: CommandArgs<"message_send"> & { system?: boolean },
+    args: CommandArgs<"message_send"> & {
+      system?: boolean;
+      purpose?: "handoff" | "delivery" | "dependency" | "supervisor";
+    },
   ): CommandResults["message_send"] {
     this.get("project", args.project_id);
     if (args.from_run_id)

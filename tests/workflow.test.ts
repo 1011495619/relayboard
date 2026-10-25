@@ -160,6 +160,7 @@ test("guided executor must recover and complete ordered steps before verificatio
         expected_version: g.task!.version,
         reviewer_run_id: run.id,
         accepted: true,
+        human_review: true,
         note: "self",
       }),
     errorCode("SELF_REVIEW"),
@@ -170,6 +171,7 @@ test("guided executor must recover and complete ordered steps before verificatio
     expected_version: g.task!.version,
     reviewer_run_id: reviewer.id,
     accepted: true,
+    human_review: true,
     note: "独立核对通过",
   });
   assert.equal(f.next(run.id, task.id).stage, "done");
@@ -319,6 +321,7 @@ test("done dependencies must be received by artifact revision, not just declared
     task_id: dep.id,
     expected_version: dep.version,
     accepted: true,
+    human_review: true,
     note: "人工核对",
   });
   const task = f.create({ depends_on: [dep.id] });

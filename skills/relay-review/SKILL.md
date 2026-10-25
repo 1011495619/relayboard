@@ -24,3 +24,9 @@ Use `relay_task_review` with your own `reviewer_run_id`, latest `expected_versio
 For a coordinator, check all required children are accepted, exact delivered revisions are integrated and a fresh passing integration checkpoint was saved after child acceptance. Child success alone is insufficient. Preserve review conclusions in durable messages/decisions; “acknowledged” only records reading a message; message_resolve stores its handling conclusion. Use paged work_requests to inspect unresolved task/ancestor requests, including old-owner requests.
 
 For independent recovery trials, give the new executor only the service connection, assigned task and relevant Skill. Record actual model/client, human interventions, missed constraints, repeated work and final acceptance. Do not describe a Codex trial as a smaller-model or Claude/pi trial.
+
+## Evidence and identity (0.7+)
+
+Review the current complete verification set and inspect evidence_history when failures were superseded. Snapshot summary explains the replacement; old snapshots remain read-only. Old fingerprint algorithms require fresh verification once. A version commit with identical scoped contents is provenance, not changed contents; scoped modifications and dependency changes still require inspection.
+
+Agent reviewers supply their own active reviewer_run_id. Anonymous review requires explicit human_review=true from human management; this flag is an audit declaration, not authentication. Never use it to hide self-review, and never claim a new Run establishes an independent model review.

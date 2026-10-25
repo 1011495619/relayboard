@@ -23,6 +23,8 @@ export function unwrapToolResult(result: CallToolResult): unknown {
       error.message || "MCP tool failed",
       error.code || "MCP_TOOL_ERROR",
       error.details,
+      error.next_action,
+      error.retryable,
     );
   }
   return value;

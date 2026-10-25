@@ -117,16 +117,41 @@ export function needsRecovery(service: Service, task: Task): boolean {
     task.workflow.recovered_signature !== recoverySignature(service, task)
   );
 }
-export function evidenceStale(service: Service, task: Task): boolean {
-  if (!task.evidence?.fingerprint || !task.owner_run_id) return false;
+export function evidenceDifference(service: Service, task: Task) {
+  if (!task.evidence?.fingerprint || !task.owner_run_id) return null;
   const actual = observeWorkspace(
     service.run(task.owner_run_id).workdir,
     task.scopes,
   );
-  return (
-    actual.fingerprint !== task.evidence.fingerprint ||
-    actual.workdir !== task.evidence.workdir
+  const recorded = task.evidence;
+  const stale =
+    actual.fingerprint !== recorded.fingerprint ||
+    actual.workdir !== recorded.workdir;
+  if (!stale) return null;
+  const paths = new Set([
+    ...Object.keys(recorded.files || {}),
+    ...Object.keys(actual.files || {}),
+  ]);
+  const changed = [...paths].filter(
+    (p) => recorded.files?.[p] !== actual.files?.[p],
   );
+  return {
+    reason: !actual.fingerprint
+      ? "observation_unavailable"
+      : recorded.algorithm !== actual.algorithm
+        ? "legacy_baseline"
+        : "scope_content_changed",
+    changed_files: changed.slice(0, 50),
+    changed_total: changed.length,
+    recorded_revision: recorded.revision,
+    actual_revision: actual.revision,
+    next_tool: "relay_work_next",
+    task_id: task.id,
+    note: "仓库版本仅作来源记录；当前范围内容及依赖契约仍须验证。旧算法基线需重新验证一次。",
+  };
+}
+export function evidenceStale(service: Service, task: Task): boolean {
+  return !!evidenceDifference(service, task);
 }
 export function pendingRequests(service: Service, task: Task) {
   const ids = new Set([task.id, ...service.ancestors(task).map((t) => t.id)]);
@@ -234,6 +259,10 @@ export function workGuide(
   if (task.description.length > 1200 || task.acceptance.length > 1200)
     guide.warnings.push(
       "任务长字段有省略，请使用 relay_task 读取完整说明与验收标准",
+    );
+  if (task.waiting)
+    guide.warnings.push(
+      `已声明等待至 ${task.waiting.until}：${task.waiting.reason.slice(0, 300)}。到期恢复巡视；等待不算任务进展。`,
     );
   const allDecisions = relevantDecisions(service, task);
   guide.decisions = allDecisions
@@ -522,6 +551,10 @@ function boundGuide(guide: WorkGuide): WorkGuide {
     }),
   );
   if (guide.task) {
+    if (guide.task.evidence?.files) {
+      guide.task.evidence.files = undefined;
+      omitted.push("文件指纹清单（relay_task全文）");
+    }
     guide.task.scopes = take(
       guide.task.scopes,
       10,

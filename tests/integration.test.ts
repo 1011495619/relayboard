@@ -513,3 +513,42 @@ test("real HTTP MCP guides a fresh executor through recovery, steps, verificatio
     "agent_reported",
   );
 });
+
+test("guided HTTP MCP discovery is compact, errors are structured, and advanced schemas remain discoverable", async (t) => {
+  const f = await fixture(t, { token: "feedback-auth" });
+  const client = new Client({ name: "guided-feedback", version: "1" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(f.url + "/mcp?mode=guided"), {
+      requestInit: { headers: { Authorization: "Bearer feedback-auth" } },
+    }),
+  );
+  t.after(() => client.close());
+  const tools = await client.listTools();
+  assert.ok(tools.tools.some((x) => x.name === "relay_work_takeover"));
+  assert.ok(!tools.tools.some((x) => x.name === "relay_task_checkpoint"));
+  const schema = (await client.callTool({
+    name: "relay_api",
+    arguments: { name: "task_checkpoint" },
+  })) as CallToolResult;
+  assert(schema.structuredContent?.result);
+  const result = (await client.callTool({
+    name: "relay_work_start",
+    arguments: { run_id: "missing", task_id: "missing" },
+  })) as CallToolResult;
+  assert.equal(result.isError, true);
+  assert.equal(
+    (result.structuredContent?.result as { code: string }).code,
+    "NOT_FOUND",
+  );
+  const bad = await f.post("/api/command", {
+    operation: "send_message",
+    args: {},
+  });
+  assert.equal(bad.error.next_action.tool, "relay_api");
+  const unauth = await fetch(f.url + "/mcp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(unauth.status, 401);
+});

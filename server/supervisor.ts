@@ -243,6 +243,11 @@ export class Supervisor {
         });
       return null;
     }
+    if (
+      task.waiting?.run_id === task.owner_run_id &&
+      at < Date.parse(task.waiting.until)
+    )
+      return null;
     // A coordinator waiting for children is not itself a stalled writer. Descendants are scanned independently.
     const waitingChildren =
       task.mode === "coordinator" &&

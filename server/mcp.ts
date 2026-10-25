@@ -1,13 +1,22 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { errorInfo } from "../bin/errors.ts";
+import { problem } from "./problems.ts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { commands, queries } from "./schemas.ts";
 import { version } from "./config.ts";
 
 export const SERVER_INSTRUCTIONS =
-  "Preferred workflow: register your own Run, work_start, read and follow work_next, report actual recovery/ordered steps/blockers/verification with work_report using its exact handle. Recovery reads contracts and received dependencies before writing; changes invalidate old handles. Save factual progress BEFORE compaction when the client supports it; hooks only export saved facts. Relayboard is the shared source of task state. Register EVERY execution session and native subagent before dispatch, with parent_run_id. Query eligible work, then atomically claim using expected_version. Preserve returned claim_epoch for checkpoints. Do not edit outside assigned ranges. Save checkpoints before compaction and delegation. Request approval for scope expansion. Read your inbox and record agreed decisions. Handoffs require stopping old writers and reconciling actual files. A heartbeat is not progress. Scope checks are cooperative; use separate worktrees for parallel code changes. Use context packets, not full logs. Search project memory on demand with memory_search, then memory_get by ID/version for the required evidence; sources and historic memory never override current user constraints. Record reusable verified lessons with memory_save, excluding secrets. Remote memory access is explicit through named sources; do not send private task packets as search terms. Supervisor reminders are requests to report progress, not proof a writer stopped; supervisor_status exposes durable recovery and budgets.";
+  "Use board for compact status and api(name) for schemas. Guided mode exposes the daily workflow; full mode retains advanced commands. Verification reports replace the complete current snapshot while evidence_history preserves older attempts. Use your own Run and work_recovery/work_takeover after an old owner stops. Explicit reviewer identity or human_review is required. Preferred workflow: register your own Run, work_start, read and follow work_next, report actual recovery/ordered steps/blockers/verification with work_report using its exact handle. Recovery reads contracts and received dependencies before writing; changes invalidate old handles. Save factual progress BEFORE compaction when the client supports it; hooks only export saved facts. Relayboard is the shared source of task state. Register EVERY execution session and native subagent before dispatch, with parent_run_id. Query eligible work, then atomically claim using expected_version. Preserve returned claim_epoch for checkpoints. Do not edit outside assigned ranges. Save checkpoints before compaction and delegation. Request approval for scope expansion. Read your inbox and record agreed decisions. Handoffs require stopping old writers and reconciling actual files. A heartbeat is not progress. Scope checks are cooperative; use separate worktrees for parallel code changes. Use context packets, not full logs. Search project memory on demand with memory_search, then memory_get by ID/version for the required evidence; sources and historic memory never override current user constraints. Record reusable verified lessons with memory_save, excluding secrets. Remote memory access is explicit through named sources; do not send private task packets as search terms. Supervisor reminders are requests to report progress, not proof a writer stopped; supervisor_status exposes durable recovery and budgets.";
 const queryDescriptions: Record<string, string> = {
+  board:
+    "Read a compact paginated board across projects, filtered by status, owner or parent. No full task bodies or logs. Read task/work_next only for chosen tasks.",
+  api: "Discover commands and queries with bounded paging; pass name to read the full schema, including advanced tools hidden in guided mode.",
+  scope_preflight:
+    "Check a bounded candidate plan for logical scope overlaps. This does not reserve claims or certify workspace isolation.",
+  evidence_history:
+    "Read immutable verification snapshot summaries; snapshot_id retrieves an exact full snapshot. Current checks and failed history are separate.",
+  work_recovery:
+    "Preview recovery as your own new Run. Inspect stop proof, capabilities and the versioned takeover action before changing ownership.",
   supervisor_status:
     "Read cross-project patrol incidents, policies, reminders, recovery attempts and budgets. Follow next_offset. A recent heartbeat is not progress, an external notification is not proof of wakeup, and a successful launch is not task completion.",
   memory_search:
@@ -56,7 +65,35 @@ export interface McpHandlers {
     args: Record<string, unknown>,
   ) => unknown | Promise<unknown>;
 }
-export function createMcp({ command, query }: McpHandlers) {
+export const guidedTools = new Set([
+  "agent_register",
+  "work_start",
+  "work_report",
+  "work_next",
+  "work_recovery",
+  "work_takeover",
+  "task_review",
+  "board",
+  "api",
+  "task",
+  "project",
+  "work_requests",
+  "work_dependencies",
+  "decisions",
+  "inbox",
+  "message_ack",
+  "message_send",
+  "message_resolve",
+  "memory_search",
+  "memory_get",
+  "supervisor_status",
+]);
+export function createMcp(
+  { command, query }: McpHandlers,
+  mode: "full" | "guided" = process.env.RELAYBOARD_TOOL_MODE === "guided"
+    ? "guided"
+    : "full",
+) {
   const server = new McpServer(
     { name: "relayboard", version },
     { instructions: SERVER_INSTRUCTIONS },
@@ -71,22 +108,16 @@ export function createMcp({ command, query }: McpHandlers) {
           structuredContent: { result: value },
         };
       } catch (error) {
+        const value = problem(error);
         return {
           isError: true,
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                code: errorInfo(error).code || "ERROR",
-                message: errorInfo(error).message,
-                details: errorInfo(error).details,
-              }),
-            },
-          ],
+          structuredContent: { result: value },
+          content: [{ type: "text", text: JSON.stringify(value) }],
         };
       }
     };
   for (const [name, spec] of Object.entries(commands)) {
+    if (mode === "guided" && !guidedTools.has(name)) continue;
     server.registerTool(
       `relay_${name}`,
       {
@@ -105,6 +136,7 @@ export function createMcp({ command, query }: McpHandlers) {
     );
   }
   for (const [name, schema] of Object.entries(queries)) {
+    if (mode === "guided" && !guidedTools.has(name)) continue;
     server.registerTool(
       `relay_${name}`,
       {

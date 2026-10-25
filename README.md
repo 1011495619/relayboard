@@ -8,18 +8,18 @@
 
 需要 Node.js 24+。安装包已包含构建好的网页，首次运行由 npx 安装运行依赖，启动时自动打开看板。
 
-当前尚未发布到 npm。下载 `relayboard-0.6.1.tgz`，在下载目录运行：
+当前尚未发布到 npm。下载 `relayboard-0.7.0.tgz`，在下载目录运行：
 
 ```bash
-npx --yes --package=./relayboard-0.6.1.tgz relayboard
+npx --yes --package=./relayboard-0.7.0.tgz relayboard
 ```
 
 服务启动后保留终端，按 Ctrl+C 停止。再次运行会识别已有 Relayboard 并打开同一看板。
 
 ```bash
 # 改端口、指定数据目录或关闭自动开浏览器
-npx --yes --package=./relayboard-0.6.1.tgz relayboard --port 4320 --no-open
-npx --yes --package=./relayboard-0.6.1.tgz relayboard --data-dir /absolute/path/to/data
+npx --yes --package=./relayboard-0.7.0.tgz relayboard --port 4320 --no-open
+npx --yes --package=./relayboard-0.7.0.tgz relayboard --data-dir /absolute/path/to/data
 ```
 
 发布到 npm 后，公开安装入口就是以下命令；发布前请使用上面的本地包：
@@ -269,7 +269,7 @@ JSON
 }
 ```
 
-步骤 ID 保持唯一、稳定。没有执行说明的旧任务仍可按验收标准和检查点继续。指引给出 `recover`、`execute`、`blocked`、`verify`、`submit`、`review`、`wait_children`、`done` 或 `unavailable` 阶段；读取实际 `next_action`，报告中填真实结果，不把模板占位文字当作证据。契约、计划或依赖变化后按新指引重新核验；需求或契约变化会保守重置受影响任务的步骤，纯交接且需求未变则保留已完成步骤。所有步骤完成仍需实际验证与独立验收。没有步骤计划时，执行就绪后用 `progress` 和 `ready_for_verification: true` 进入验证；`verify` 必须包含实际执行的非空 verification 记录，失败后可修正再试。guided verify 的列表是本次完整的当前检查快照，替换旧当前列表，必须包含全部必要检查和失败项；旧失败保留在事件历史，原低层 task_checkpoint 仍按原有规则合并。
+步骤 ID 保持唯一、稳定。没有执行说明的旧任务仍可按验收标准和检查点继续。指引给出 `recover`、`execute`、`blocked`、`verify`、`submit`、`review`、`wait_children`、`done` 或 `unavailable` 阶段；读取实际 `next_action`，报告中填真实结果，不把模板占位文字当作证据。契约、计划或依赖变化后按新指引重新核验；需求或契约变化会保守重置受影响任务的步骤，纯交接且需求未变则保留已完成步骤。所有步骤完成仍需实际验证与独立验收。没有步骤计划时，执行就绪后用 `progress` 和 `ready_for_verification: true` 进入验证；`verify` 必须包含实际执行的非空 verification 记录，失败后可修正再试。guided verify 的列表是本次完整的当前检查快照，替换旧当前列表，必须包含全部必要检查和失败项；旧失败保留在不可变快照及事件历史；低层 task_checkpoint 提交非空列表时同样替换完整当前集合。
 
 接手包优先保留目标、约束和当前行动。整个指引 JSON 用顶层 `truncated`、`omissions` 和 `char_budget` 标明预算与省略（有效下限 6000 字符），其中 context 也有自己的 truncated。任一层有省略时，先按引用读取完整任务、决定或依赖，再确认已读。记录已存在不等于它已在当前工作区被接收；不同 worktree 的成果需要明确集成。
 
@@ -349,7 +349,7 @@ npm run web:dev     # 另一个终端保留 npm start；Vite 在 5173 代理本�
 ```bash
 npm pack --pack-destination /absolute/path/to/releases
 # 核对包内容和发布身份后，发布已经验证过的同一个包：
-npm publish /absolute/path/to/releases/relayboard-0.6.1.tgz --access public --registry=https://registry.npmjs.org
+npm publish /absolute/path/to/releases/relayboard-0.7.0.tgz --access public --registry=https://registry.npmjs.org
 ```
 
 本项目尚未公开发布到 npm。安装包验证结果以对应版本的 `VALIDATION.md` 为准；发布者需使用有包名发布权限的 npm 账号。
@@ -401,3 +401,37 @@ refactor(protocol): 关联命令输入和返回类型
 - 记忆效果评估：用真实接手任务比较首次成功率、补读次数、重复失败和上下文用量，再决定是否增加语义检索或其他记忆服务适配器。
 - 大规模巡视：项目增多后测量每轮耗时与 SQLite 查询成本，再添加索引、增量扫描与分级通知。
 - 建议式改进：从有证据的失败记录产生待评审任务，保留版本与回滚；自动生成建议和实际执行继续通过任务契约及策略衔接。
+
+## 0.7 协作修复与升级说明
+
+本轮根据 pi、DSH Team Lead、Hermes 在同一个迁移项目中的反馈完善收尾和恢复流程。原报告保留在源码 `docs/`；它们是使用者报告，部分功能存在但入口未被发现，具体改动以当前实现与验证为准。
+
+- **统一当前验证集合**：`task_checkpoint` 提供非空 `verification` 时与 `work_report(kind="verify")` 一样，提交的是完整当前集合，替代原因记录在 `summary`。不要仅提交通过的子集；仍然有效的失败检查必须保留。空数组不清除旧集合，也不产生新验证。新快照与升级前的当前集合保存在 `evidence_history`，旧事件不删除。网页任务详情可分页查看快照及失败正文。
+- **内容基线与仓库版本分开**：新指纹比较 scope 内的实际文件内容、路径和执行位；无关提交及已验证内容自身的提交不会仅因 HEAD 变化而过期。scope 内改动仍使证据过期，相关依赖/契约仍按原规则核验。旧算法证据需要重新验证一次。观察有文件数/大小预算，特殊文件或超预算明确报告未完整观察。测试执行仍是执行者自报。
+- **显式验收身份**：`task_review` 须提供独立的有效 `reviewer_run_id`，或在人工管理入口显式声明 `human_review:true`。传入执行者自身身份时，即使同时声明人工标记也会被自审检查拦下。人工标记是审计意图，不是身份认证；本版仍是本机共享令牌与合作式 Run 身份，没有 per-run 凭据隔离。
+- **新身份接管**：先 `work_recovery {task_id,run_id}`，按预览中的版本调用 `work_takeover`，填写 `reason`。已记录结束的旧执行者可直接进入接手核验；未知写入者须实际确认停止或隔离工作区。所有现有能力、范围、并发、活动后代和托管进程守卫保持生效，新会话从 `work_next` 的 recover 继续，旧验证不直接视作新会话已验证。
+- **通知闭环**：接收者完成核验后，关联交接通知自动记录处理结论；验收处理关闭关联提交通知。已有通知在启动时按已完成的核验/验收时间处理。用户的 request/blocker、普通讨论及不匹配的系统通知保留，读取和处理仍是两件事。
+- **有限等待**：长测试可用 `work_report(kind="wait", wait_until, summary)` 声明未来24小时内的检查时间。期间暂停该任务的巡视判定，到期恢复；声明等待不推进检查点、不证明测试通过，也不代表进程已停止。
+
+### Agent 常用入口
+
+用 `board` 代替全量 `snapshot` 看状态：可按项目、`status` 数组、负责人、父任务或 `pending_review` 过滤，分页返回简短的阻塞、下一步和进度年龄。再针对选中任务读 `task` / `work_next`。
+
+`api` 无需参数即可分页列出命令与查询；传 `name` 返回该工具完整 JSON Schema。底层直接领取会返回引导流程提示；相同负责人用当前任务版本重复领取仅确认已有归属，不增加 epoch。旧版本依然报错，避免静默重放。
+
+HTTP MCP 默认保留全部工具；需要减少工具描述上下文时使用 `http://127.0.0.1:4317/mcp?mode=guided`。stdio 可设置 `RELAYBOARD_TOOL_MODE=guided`。引导模式突出日常工作、消息、记忆读取与恢复工具；高级建项/分工/发布命令仍可从完整连接或 CLI 调用，`api(name)` 可查询其 schema。
+
+`scope_preflight` 比较最多16个候选任务的逻辑范围；`plan_create` 原子创建最多16个任务，并用 `key` / `needs` 连接批次内依赖。`exclusive:true` 拒绝候选范围重叠，默认返回建议。预检不预留执行权，不观察磁盘越界写入，领取时仍检查已有占用。并行写入建议用独立实际 worktree。
+
+```bash
+# 不调用模型，检查服务、认证及 MCP 连接
+node lib/bin/relayboard.js doctor
+
+# 按需查一个工具的完整结构
+node lib/bin/relayboard.js call api '{"name":"plan_create"}'
+
+# 只看待验收任务
+node lib/bin/relayboard.js call board '{"pending_review":true,"limit":20}'
+```
+
+应用错误通过 HTTP 与 MCP 返回相同的错误码、详细原因和可用时的 `next_action`；不会自动填写旧进程停止证明或自动重试写入。MCP SDK 自身的输入校验错误仍受客户端/SDK格式影响。`doctor` 不会修改客户端登录和权限，也不重启外部客户端。

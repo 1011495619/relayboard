@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z, ZodError } from "zod";
+import { problem } from "./problems.ts";
 import { queries } from "./schemas.ts";
 import { Store } from "./store.ts";
 import { Service, AppError } from "./domain.ts";
@@ -44,6 +45,7 @@ export function createApp({
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const store = new Store(join(dataDir, "relayboard.sqlite")),
     service = new Service(store);
+  store.transaction(() => service.reconcileSystemNotices());
   const runner = new Runner(service, {
     dataDir,
     baseUrl: `http://127.0.0.1:${port}`,
@@ -288,10 +290,13 @@ export function createApp({
         .status(405)
         .set("Allow", "POST")
         .json({ error: "Stateless MCP endpoint; use POST" });
-    const server = createMcp({
-      command: (op, args, id) => service.execute(op, args, id),
-      query,
-    });
+    const server = createMcp(
+      {
+        command: (op, args, id) => service.execute(op, args, id),
+        query,
+      },
+      req.query.mode === "guided" ? "guided" : "full",
+    );
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
@@ -320,22 +325,10 @@ export function createApp({
     );
   const handleError: ErrorRequestHandler = (error: unknown, req, res, next) => {
     if (res.headersSent) return next(error);
-    if (error instanceof ZodError)
-      return res.status(400).json({
-        error: {
-          code: "VALIDATION",
-          message: "输入格式需要调整",
-          details: error.issues,
-        },
-      });
-    if (error instanceof AppError)
-      return res.status(error.status).json({
-        error: {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-        },
-      });
+    if (error instanceof ZodError || error instanceof AppError)
+      return res
+        .status(error instanceof ZodError ? 400 : error.status)
+        .json({ error: problem(error) });
     if (errorInfo(error).type === "entity.parse.failed")
       return res.status(400).json({
         error: { code: "INVALID_JSON", message: "请求须为有效 JSON" },

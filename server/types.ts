@@ -168,6 +168,8 @@ export interface WorkspaceEvidence {
   observed_at: string;
   reason?: string;
   verification_source: "agent_reported";
+  algorithm?: "scope-content-v2";
+  files?: Record<string, string>;
 }
 export interface WorkflowState {
   recovered_epoch: number;
@@ -218,6 +220,9 @@ export interface Task extends VersionedRecord, TaskFields {
   evidence?: WorkspaceEvidence;
   artifacts: Artifact[];
   verification: Verification[];
+  waiting?: { until: string; reason: string; run_id: string } | null;
+  verification_snapshot_id?: string;
+  warnings?: string[];
   claimed_at?: string;
   submitted_at?: string;
   submission?: string;
@@ -234,6 +239,7 @@ export interface Message extends VersionedRecord, CommandArgs<"message_send"> {
   resolved_by?: string;
   resolution?: string;
   system?: boolean;
+  purpose?: "handoff" | "delivery" | "dependency" | "supervisor";
 }
 export interface Decision
   extends VersionedRecord, CommandArgs<"decision_record"> {}
@@ -264,7 +270,18 @@ export interface RelayEvent {
   summary?: string;
   [field: string]: unknown;
 }
+export interface EvidenceSnapshot extends VersionedRecord {
+  project_id: string;
+  task_id: string;
+  actor_run_id: string;
+  reason: string;
+  verification: Verification[];
+  evidence?: WorkspaceEvidence;
+  previous_id: string | null;
+  legacy?: boolean;
+}
 export interface RecordMap {
+  evidence_snapshot: EvidenceSnapshot;
   supervisor_policy: SupervisorPolicy;
   supervisor_incident: SupervisorIncident;
   supervisor_state: SupervisorState;
@@ -380,6 +397,66 @@ export interface WorkGuide {
   }[];
 }
 export interface QueryResults {
+  api: {
+    items: {
+      name: string;
+      kind: "command" | "query";
+      description: string;
+      fields: string[];
+      schema?: unknown;
+    }[];
+    total: number;
+    next_offset: number | null;
+  };
+  board: {
+    items: {
+      id: string;
+      short_id: string;
+      project_id: string;
+      title: string;
+      status: TaskStatus;
+      version: number;
+      owner_run_id: string | null;
+      parent_id: string | null;
+      age_seconds: number;
+      blocker: string;
+      next_action: string;
+      verification_failures: number;
+      open_requests: number;
+    }[];
+    total: number;
+    next_offset: number | null;
+  };
+  scope_preflight: {
+    overlaps: { left: string; right: string; scopes: string[] }[];
+    warnings: string[];
+  };
+  work_recovery: {
+    task_id: string;
+    owner_run_id: string | null;
+    expected_version: number;
+    known_stopped: boolean;
+    active_descendants: string[];
+    required_capabilities: string[];
+    target_capabilities: string[];
+    target_scopes: string[];
+    next_action: {
+      tool: string;
+      arguments: Record<string, unknown>;
+      required_fields: string[];
+    };
+    note: string;
+  };
+  evidence_history: {
+    items: (Omit<EvidenceSnapshot, "verification" | "evidence"> & {
+      checks: number;
+      failures: number;
+      current: boolean;
+    })[];
+    total: number;
+    next_offset: number | null;
+    snapshot?: EvidenceSnapshot;
+  };
   supervisor_status: SupervisorStatus;
   memory_search: MemorySearchResult;
   memory_get: ProjectMemory;
@@ -428,6 +505,12 @@ export interface QueryResults {
   context: ContextPacket;
 }
 export interface CommandResults {
+  plan_create: {
+    tasks: Task[];
+    keys: Record<string, string>;
+    preflight: QueryResults["scope_preflight"];
+  };
+  work_takeover: WorkGuide;
   supervisor_handle: SupervisorIncident;
   supervisor_configure: SupervisorPolicy;
   memory_save: ProjectMemory;

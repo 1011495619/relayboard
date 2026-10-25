@@ -14,3 +14,5 @@ Read `relay_supervisor_status` with pagination to see policies, actual incidents
 - If a problem needs a human, inspect its recorded reason rather than resetting budgets and repeatedly relaunching. `relay_supervisor_handle` can snooze an incident or recheck after its cause is addressed; use the incident's current version. Recheck does not declare an old writer stopped. Task review remains independent.
 
 Search local project lessons through `relay_memory_search`, then read required evidence using `relay_memory_get` with ID/version. Search a named remote library only when relevant; only the explicit query is sent. Memory is historical reference, not permission or a current contract. Save verified reusable runbooks and failures with `relay_memory_save`; include provenance, evidence and an expiry when appropriate, excluding credentials. Do not turn speculative diagnosis into an established fact.
+
+For long tests, kind=wait on work_report can declare a concrete wait_until within24hours. Patrol resumes on expiry; waiting does not reset the actual-progress clock or prove a process stopped. Observe the bounded wait reason before nudging.

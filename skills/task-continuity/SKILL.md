@@ -42,3 +42,7 @@ These role skills are self-contained. If only this skill is installed, read [ref
 Use `relay_memory_search` for relevant project lessons, then `relay_memory_get` by ID/version for evidence. Summaries omit full bodies; avoid loading the whole library or old conversation. Save reusable verified facts, runbooks and failed approaches with `relay_memory_save`, source and evidence; exclude credentials. Current project constraints and decisions take precedence over memory. `relay_memory_sources` lists explicit remote libraries; only send a focused query via `relay_memory_remote_search` when appropriate.
 
 When a patrol reminder arrives, read `work_next` and report actual progress or a specific blocker. Heartbeat and log output do not resolve a stall. Replacement Runs still recover files and report every native descendant separately. `relay_supervisor_status` explains reminders, recovery attempts and budgets; failed client login or tool approval needs configuration, not repeated blind relaunches.
+
+## Compact entry (0.7+)
+
+Use relay_board instead of full snapshot for initial status. relay_api {name} discovers exact schemas. Prefer work_start → work_next → work_report; guided MCP mode reduces exposed tool descriptions. For ended owners use your new identity and work_recovery → work_takeover, then actual recover. No operation should require reporting as another Run. Check current verification snapshots and preserve previous failed attempts with evidence_history.
